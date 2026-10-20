@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' blob: data:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="theme-color" content="#0b0b12">
+  <meta name="description" content="WilScan: escanea documentos con la cámara, reconoce su texto y trabaja con PDF sin subir nada a ningún servidor.">
+  <title>WilScan · by WG</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/library.css">
+  <link rel="stylesheet" href="css/scanner.css">
+  <link rel="stylesheet" href="css/editor.css">
+  <link rel="stylesheet" href="css/tools.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><img src="assets/logo.svg" alt="WG" width="30" height="30"><b>WilScan</b><span class="by">by WG</span></div>
+    <nav class="tabs" aria-label="Secciones">
+      <button class="tab on" data-tab="docs" type="button">Documentos</button>
+      <button class="tab" data-tab="tools" type="button">Herramientas</button>
+    </nav>
+    <span class="grow"></span>
+    <button class="btn small" id="btnImport" type="button" aria-label="Importar archivos"><svg class="i s" aria-hidden="true"><use href="assets/icons.svg#upload"/></svg><span>Importar</span></button>
+    <button class="btn small primary scan-btn-top" data-scan type="button" hidden><svg class="i s" aria-hidden="true"><use href="assets/icons.svg#scan"/></svg>Escanear</button>
+    <button class="icon-btn" data-tab="settings" type="button" aria-label="Ajustes"><svg class="i" aria-hidden="true"><use href="assets/icons.svg#settings"/></svg></button>
+  </header>
+
+  <main class="views">
+    <section id="v-docs" class="view on" aria-label="Documentos"></section>
+    <section id="v-tools" class="view" aria-label="Herramientas"></section>
+    <section id="v-settings" class="view" aria-label="Ajustes"></section>
+  </main>
+
+  <nav class="tabbar" aria-label="Navegación">
+    <button class="tb on" data-tab="docs" type="button"><svg class="i" aria-hidden="true"><use href="assets/icons.svg#docs"/></svg><span>Documentos</span></button>
+    <button class="fab" data-scan type="button" aria-label="Escanear un documento"><svg class="i" aria-hidden="true"><use href="assets/icons.svg#scan"/></svg></button>
+    <button class="tb" data-tab="tools" type="button"><svg class="i" aria-hidden="true"><use href="assets/icons.svg#tools"/></svg><span>Herramientas</span></button>
+  </nav>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

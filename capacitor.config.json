@@ -1,0 +1,7 @@
+{
+  "appId": "com.wg.wilscan",
+  "appName": "WilScan",
+  "webDir": "www",
+  "server": { "androidScheme": "https" },
+  "android": { "allowMixedContent": false, "backgroundColor": "#0b0b12" }
+}

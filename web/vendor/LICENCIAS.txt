@@ -1,0 +1,10 @@
+WilScan usa estas librerías de código abierto, incluidas sin modificar:
+
+- OpenCV.js · Apache-2.0 — @techstark/opencv-js@5.0.0-release.1 — https://github.com/TechStark/opencv-js#readme
+- pdf-lib · MIT — pdf-lib@1.17.1 — https://pdf-lib.js.org
+- PDF.js · Apache-2.0 — pdfjs-dist@6.4.299 — https://mozilla.github.io/pdf.js/
+- Tesseract.js · Apache-2.0 — tesseract.js@7.0.0 — https://github.com/naptha/tesseract.js
+- Tesseract core · Apache-2.0 — tesseract.js-core@7.0.0 — https://github.com/naptha/tesseract.js-core
+- Datos de idioma (spa, eng) · Apache-2.0 — @tesseract.js-data/spa@1.0.0 — https://github.com/naptha/tessdata
+
+Los textos completos de las licencias están en cada paquete de npm (carpeta node_modules/<paquete>/LICENSE).

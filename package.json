@@ -1,0 +1,31 @@
+{
+  "name": "wilscan",
+  "productName": "WilScan",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WilScan · by WG — escáner de documentos con OCR y herramientas PDF, web y Android",
+  "author": "WG — Wilmar Gómez",
+  "license": "UNLICENSED",
+  "scripts": {
+    "web": "node tools/serve.js",
+    "vendor": "node tools/vendor.js",
+    "test:static": "node tests/static.test.js"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/filesystem": "8.1.5",
+    "@capacitor/share": "8.0.3",
+    "@techstark/opencv-js": "5.0.0-release.1",
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/spa": "1.0.0",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.4.299",
+    "tesseract.js": "7.0.0",
+    "tesseract.js-core": "7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3",
+    "ws": "8.18.0"
+  }
+}

@@ -1,0 +1,16 @@
+
+# claves de firma y compilaciones
+android-keystore/
+android/local.properties
+android/app/build/
+android/build/
+android/.gradle/
+www/
+release/
+node_modules/
+tests/fixtures/
+tests/out/
+
+# generado al sincronizar
+android/app/src/main/assets/
+android/capacitor-cordova-android-plugins/

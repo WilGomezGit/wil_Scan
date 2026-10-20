@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">WilScan</string>
+    <string name="title_activity_main">WilScan</string>
+    <string name="package_name">com.wg.wilscan</string>
+    <string name="custom_url_scheme">com.wg.wilscan</string>
+</resources>

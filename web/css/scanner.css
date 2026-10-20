@@ -1,0 +1,40 @@
+.scan { position: fixed; inset: 0; z-index: 50; background: #000; color: #fff; overflow: hidden; touch-action: none; }
+.scan-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.scan-video.mirror { transform: scaleX(-1); }
+.scan-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.scan-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+.scan-flash.go { animation: shot .28s ease-out; }
+@keyframes shot { from { opacity: .85; } to { opacity: 0; } }
+
+.scan-top { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 10px; padding: calc(12px + var(--safe-t)) calc(14px + var(--safe-r)) 12px calc(14px + var(--safe-l)); background: linear-gradient(rgba(0, 0, 0, .6), transparent); }
+.scan-top .grow { flex: 1; }
+.scan .icon-btn.solid { background: rgba(20, 22, 38, .72); border-color: rgba(255, 255, 255, .18); color: #fff; backdrop-filter: blur(6px); }
+.scan .icon-btn.solid.on { color: #05060c; background: var(--a); border-color: var(--a); }
+.scan-chip { background: rgba(20, 22, 38, .72); backdrop-filter: blur(6px); color: #fff; }
+.scan-chip.on { background: var(--a); border-color: var(--a); color: #05060c; }
+
+.scan-hint { position: absolute; left: 50%; top: calc(76px + var(--safe-t)); transform: translateX(-50%); max-width: 86vw; padding: 8px 16px; border-radius: 999px; background: rgba(8, 9, 18, .78); backdrop-filter: blur(6px); font-weight: 600; font-size: 14px; text-align: center; pointer-events: none; }
+.scan-msg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(90vw, 420px); padding: 24px 20px; border-radius: 20px; background: rgba(16, 17, 28, .96); border: 1px solid var(--line2); text-align: center; }
+.scan-msg h3 { font-size: 19px; margin-bottom: 8px; }
+.scan-msg p { color: var(--mut); margin-bottom: 18px; }
+.scan-msg .btn-row { justify-content: center; }
+
+.scan-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px calc(18px + var(--safe-r)) calc(18px + var(--safe-b)) calc(18px + var(--safe-l)); background: linear-gradient(transparent, rgba(0, 0, 0, .72) 40%); }
+.scan-modes-wrap { display: flex; justify-content: center; margin-bottom: 16px; }
+.scan-modes { display: inline-flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(20, 22, 38, .72); backdrop-filter: blur(6px); }
+.scan-mode { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 16px; border: 0; border-radius: 999px; background: transparent; color: #cfd3f5; font-weight: 600; font-size: 14px; }
+.scan-mode.on { background: #fff; color: #05060c; }
+.scan-controls { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.scan-controls > :first-child { justify-self: start; }
+.scan-shutter { width: 76px; height: 76px; border-radius: 50%; border: 4px solid #fff; background: transparent; padding: 0; display: grid; place-items: center; }
+.scan-shutter i { display: block; width: 58px; height: 58px; border-radius: 50%; background: #fff; transition: transform .1s; }
+.scan-shutter:active i { transform: scale(.88); }
+.scan-shutter:disabled { opacity: .5; }
+.scan-done { justify-self: end; position: relative; width: 56px; height: 56px; padding: 0; border: 2px solid rgba(255, 255, 255, .85); border-radius: 12px; background: rgba(20, 22, 38, .6); overflow: visible; }
+.scan-done:disabled { border-style: dashed; border-color: rgba(255, 255, 255, .3); }
+.scan-done canvas { width: 100%; height: 100%; object-fit: cover; border-radius: 9px; display: block; }
+.scan-count { position: absolute; top: -9px; right: -9px; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 999px; background: var(--b); color: #fff; font-size: 12px; font-weight: 800; display: grid; place-items: center; }
+.scan-ok { position: absolute; right: -6px; bottom: -6px; width: 24px; height: 24px; border-radius: 50%; background: var(--ok); color: #05060c; display: grid; place-items: center; }
+.scan-ok svg { width: 14px; height: 14px; stroke-width: 3; }
+.scan-done.half .scan-ok { display: none; }
+@media (min-width: 760px) { .scan-video { object-fit: contain; } }

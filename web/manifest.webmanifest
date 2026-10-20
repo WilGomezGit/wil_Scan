@@ -1,0 +1,21 @@
+{
+  "name": "WilScan · by WG",
+  "short_name": "WilScan",
+  "description": "Escanea documentos con la cámara, reconoce su texto y trabaja con PDF sin subir nada a ningún servidor.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0b12",
+  "theme_color": "#0b0b12",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Escanear", "short_name": "Escanear", "url": "./?scan=1", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
