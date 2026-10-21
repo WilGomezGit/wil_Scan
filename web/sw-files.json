@@ -1,10 +1,11 @@
 {
- "version": "e9081068bb",
+ "version": "4af19f7f00",
  "shell": [
   "./",
   "assets/icon-192.png",
   "assets/icon-512.png",
   "assets/icon-maskable-512.png",
+  "assets/icon.svg",
   "assets/icons.svg",
   "assets/logo.svg",
   "css/base.css",

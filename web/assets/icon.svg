@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="WG Wil Scanner">
+  <!-- Icono de la app: monograma WG arriba y franja con el nombre abajo.
+       El fondo y la franja se salen del cuadro a propósito: así sirve también como capa de icono adaptable de Android (se recorta por fuera). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#151833"/>
+      <stop offset="1" stop-color="#07080f"/>
+    </linearGradient>
+    <linearGradient id="ln" gradientUnits="userSpaceOnUse" x1="40" y1="150" x2="464" y2="366">
+      <stop offset="0" stop-color="#00f0ff"/>
+      <stop offset="1" stop-color="#ff00e5"/>
+    </linearGradient>
+    <linearGradient id="band" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="512" y2="0">
+      <stop offset="0" stop-color="#00f0ff"/>
+      <stop offset="1" stop-color="#ff00e5"/>
+    </linearGradient>
+    <clipPath id="cut"><rect x="0" y="160" width="512" height="196"/></clipPath>
+  </defs>
+  <rect x="-512" y="-512" width="1536" height="1536" fill="url(#bg)"/>
+  <!-- WG -->
+  <g transform="translate(256 196) scale(.74) translate(-248 -258)" fill="none" stroke="url(#ln)" stroke-width="44" stroke-linecap="butt">
+    <path d="M52 140 L112 376 L150.6 224 L189.2 376 L249.2 140" stroke-linejoin="bevel" clip-path="url(#cut)"/>
+    <path d="M444 180 L336 180 L298 218 L298 298 L336 336 L444 336 L444 262 L382 262" stroke-linejoin="miter"/>
+  </g>
+  <!-- franja con el nombre -->
+  <rect x="-512" y="352" width="1536" height="700" fill="url(#band)"/>
+  <text x="256" y="433" text-anchor="middle" textLength="372" lengthAdjust="spacingAndGlyphs"
+        font-family="'Segoe UI', 'Roboto', Arial, sans-serif" font-weight="800" font-size="62" fill="#07080f">WIL SCANNER</text>
+</svg>
