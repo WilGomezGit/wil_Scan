@@ -67,3 +67,9 @@ body:has(.flt-sheet) .backdrop .sheet { pointer-events: auto; }
 .ed-flt .all { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 8px; font-size: 11px; color: var(--mut); }
 .ed-stage.working::after { content: ''; position: absolute; right: 14px; top: 14px; width: 18px; height: 18px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .25); border-top-color: var(--a); animation: edspin .8s linear infinite; }
 @keyframes edspin { to { transform: rotate(360deg); } }
+
+/* la vista previa sustituye a la imagen mientras se genera la definitiva (al girar no asoma la anterior) */
+.ed-img.under { visibility: hidden; }
+/* el contador «1 / 3» no tapa la página: la página deja sitio debajo */
+.ed-stage:not(.zoom) .ed-wrap { padding-bottom: 46px; }
+.ed-live { max-height: calc(100% - 62px); top: calc(50% - 15px); }

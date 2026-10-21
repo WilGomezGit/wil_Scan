@@ -58,14 +58,20 @@ G.escaneo = async () => {
   check('la cámara (simulada) entrega imagen', !!ready, await c.ev(`(document.querySelector('.scan-video')||{}).videoWidth + 'x' + (document.querySelector('.scan-video')||{}).videoHeight`));
   const det = await wf(() => c.ev(`/Mantén|Listo/.test(document.querySelector('.scan-hint').textContent)`), 25000, 300);
   check('detecta el documento en vivo y lo indica', !!det, await text('.scan-hint'));
-  const painted = await c.ev(`(()=>{const o=document.querySelector('.scan-overlay'); const d=o.getContext('2d').getImageData(0,0,o.width,o.height).data; let n=0; for(let i=3;i<d.length;i+=4*40) if(d[i]>0) n++; return n})()`);
-  check('dibuja el contorno del documento sobre la cámara', painted > 50, painted + ' puntos');
+  const painted = await c.ev(`(()=>{const o=document.querySelector('.scan-overlay'), p=o.querySelector('polygon'); return o.classList.contains('none') ? 0 : (p.getAttribute('points')||'').split(' ').filter(Boolean).length})()`);
+  check('dibuja el contorno del documento sobre la cámara', painted === 4, painted + ' esquinas');
   await shot('01-escaner');
   await audit('escáner (móvil)');
   await click('.scan-shutter');
+  // tras cada foto se muestra «Revisa el recorte» (Ajustes › Revisar el recorte): se confirma como haría una persona
+  const review = await wf(() => c.ev(`!!document.querySelector('.crop') && document.querySelectorAll('.crop-h').length===4`), 15000);
+  check('tras la foto se muestra el recorte para confirmarlo', !!review);
+  await shot('01b-revisar-recorte');
+  await clickText('.crop-foot .btn', 'Confirmar');
   check('1.ª foto: aparece el contador 1', !!(await wf(() => c.ev(`(document.querySelector('.scan-count')||{}).textContent==='1'`), 15000)));
   await wf(() => c.ev(`!document.querySelector('.scan-shutter').disabled`), 10000);
   await click('.scan-shutter');
+  await wf(() => exists('.crop'), 15000); await clickText('.crop-foot .btn', 'Confirmar');
   check('2.ª foto: el contador pasa a 2 (lote)', !!(await wf(() => c.ev(`(document.querySelector('.scan-count')||{}).textContent==='2'`), 15000)));
   await clickText('.scan-mode', 'Identificación');
   check('el modo Identificación pide el anverso', /ANVERSO/.test(await text('.scan-hint')), await text('.scan-hint'));
@@ -103,11 +109,15 @@ G.editor = async () => {
   check('la imagen mostrada es realmente blanco y negro', bin > 0.95, (bin * 100).toFixed(0) + ' %');
 
   // girar
-  await clickText('.ed-tool', 'Girar'); await wf(() => c.ev(`!document.querySelector('.busy')`), 20000);
+  await clickText('.ed-tool', 'Girar');
+  // el giro se ve al instante y se guarda en segundo plano: se espera a que termine y a que se muestre la imagen definitiva
+  await wf(async () => (await c.ev(`!document.querySelector('.busy') && !document.querySelector('.ed-stage.working') && (()=>{const i=document.querySelector('.ed-img'); return i.naturalWidth > i.naturalHeight})()`)), 20000);
   const rot = (await dbPages()).find((p) => p.rot === 90);
   const dim2 = await c.ev(`({w: document.querySelector('.ed-img').naturalWidth, h: document.querySelector('.ed-img').naturalHeight})`);
   check('«Girar» gira la página 90° (ahora es apaisada)', !!rot && dim2.w > dim2.h, `${dim2.w}×${dim2.h}`);
-  for (let i = 0; i < 3; i++) { await clickText('.ed-tool', 'Girar'); await wf(() => c.ev(`!document.querySelector('.busy')`), 20000); }
+  // 3 toques seguidos (sin esperar, como una persona impaciente): los giros se encadenan y al final queda la orientación original
+  for (let i = 0; i < 3; i++) { await clickText('.ed-tool', 'Girar'); await sleep(120); }
+  await wf(() => c.ev(`!document.querySelector('.ed-stage.working') && (()=>{const i=document.querySelector('.ed-img'); return i.naturalHeight > i.naturalWidth})()`), 30000);
   check('4 giros vuelven a la orientación original', (await dbPages()).every((p) => p.rot === 0 || p.rot === 90) && (await c.ev(`document.querySelector('.ed-img').naturalHeight>document.querySelector('.ed-img').naturalWidth`)));
 
   // recortar: arrastrar una esquina
@@ -123,7 +133,7 @@ G.editor = async () => {
   const h1 = await c.ev(`(()=>{const r=document.querySelectorAll('.crop-h')[0].getBoundingClientRect(); return [r.left+r.width/2, r.top+r.height/2]})()`);
   check('la esquina se arrastra con el puntero', Math.hypot(h1[0] - h0[0] - 10, h1[1] - h0[1] - 8) < 4, `movió ${Math.round(h1[0] - h0[0])},${Math.round(h1[1] - h0[1])}`);
   await clickText('.crop-foot .btn', 'Aplicar');
-  await wf(() => c.ev(`!document.querySelector('.busy') && !document.querySelector('.crop')`), 30000);
+  await wf(() => c.ev(`!document.querySelector('.busy') && !document.querySelector('.crop') && !document.querySelector('.ed-stage.working')`), 30000);
   const after = (await dbPages()).find((p) => p.id === docIds[0]).quad;
   check('el recorte se aplica y se guarda', !!after && (!before || JSON.stringify(after) !== JSON.stringify(before)));
 

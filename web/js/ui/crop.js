@@ -17,7 +17,8 @@ export function openCropper(page, opts = {}) {
   return new Promise(async (resolve) => {
     let result, done = false, q = page.quad ? page.quad.map((p) => [...p]) : null, drag = -1, dims = { w: 1, h: 1 };
     const stage = h('div', { class: 'crop-stage' });
-    const img = h('canvas', { class: 'crop-img' });
+    // la foto se muestra como imagen: en el WebView de Android un canvas redimensionado en pantalla se veía vacío (se recortaba a ciegas)
+    const img = h('img', { class: 'crop-img', alt: 'Foto a recortar', draggable: false });
     const svg = document.createElementNS(SVGNS, 'svg'); svg.setAttribute('class', 'crop-svg');
     const poly = document.createElementNS(SVGNS, 'polygon'); poly.setAttribute('class', 'crop-poly'); svg.append(poly);
     const handles = [0, 1, 2, 3].map((i) => { const c = document.createElementNS(SVGNS, 'circle'); c.setAttribute('class', 'crop-h'); c.setAttribute('r', '15'); c.dataset.i = i; svg.append(c); return c; });
@@ -36,15 +37,14 @@ export function openCropper(page, opts = {}) {
 
     const src = scaled(page.canvas || await blobToCanvas(page.orig), 1600);
     dims = { w: src.width, h: src.height };
+    img.src = src.toDataURL('image/jpeg', 0.85);
     if (!q) { try { q = await detectQuad(src, { maxSide: 520 }); } catch { q = null; } if (!q) q = full(); }
 
     let box = { x: 0, y: 0, w: 1, h: 1 };
     function layout() {
       const r = stage.getBoundingClientRect(), k = Math.min(r.width / dims.w, r.height / dims.h) * 0.98;
       box = { w: dims.w * k, h: dims.h * k, x: (r.width - dims.w * k) / 2, y: (r.height - dims.h * k) / 2 };
-      img.width = Math.round(box.w * Math.min(2, devicePixelRatio || 1)); img.height = Math.round(box.h * Math.min(2, devicePixelRatio || 1));
       img.style.width = box.w + 'px'; img.style.height = box.h + 'px'; img.style.left = box.x + 'px'; img.style.top = box.y + 'px';
-      img.getContext('2d').drawImage(src, 0, 0, img.width, img.height);
       svg.setAttribute('viewBox', `0 0 ${r.width} ${r.height}`); svg.setAttribute('width', r.width); svg.setAttribute('height', r.height);
       paint();
     }

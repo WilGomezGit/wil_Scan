@@ -20,7 +20,12 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
   let auto = !!st.autoCapture;
 
   const video = h('video', { class: 'scan-video', attrs: { playsinline: true, muted: true, autoplay: true } });
-  const overlay = h('canvas', { class: 'scan-overlay' });
+  // contorno del documento en SVG (no canvas): en el WebView de Android un canvas que se redimensiona en pantalla no se veía
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const overlay = document.createElementNS(SVGNS, 'svg'); overlay.setAttribute('class', 'scan-overlay'); overlay.setAttribute('aria-hidden', 'true');
+  const ovPoly = document.createElementNS(SVGNS, 'polygon'); ovPoly.setAttribute('class', 'scan-quad');
+  const ovDots = [0, 1, 2, 3].map(() => { const c = document.createElementNS(SVGNS, 'circle'); c.setAttribute('r', '7'); c.setAttribute('class', 'scan-dot'); return c; });
+  overlay.append(ovPoly, ...ovDots);
   const flashFx = h('div', { class: 'scan-flash' });
   const hint = h('div', { class: 'scan-hint', attrs: { 'aria-live': 'polite' } });
   const thumb = h('button', { class: 'scan-done', attrs: { type: 'button', 'aria-label': 'Terminar y revisar' } });
@@ -126,21 +131,19 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
   }
 
   // ---- detección en vivo ----
-  const sizeOverlay = () => { const r = root.getBoundingClientRect(), d = Math.min(2, window.devicePixelRatio || 1); const w = Math.round(r.width * d), hh = Math.round(r.height * d); if (overlay.width !== w || overlay.height !== hh) { overlay.width = w; overlay.height = hh; } return { d, r }; };
   function videoRect() {
     const r = root.getBoundingClientRect(), vw = video.videoWidth || 1, vh = video.videoHeight || 1, k = Math.min(r.width / vw, r.height / vh);
     return { x: (r.width - vw * k) / 2, y: (r.height - vh * k) / 2, w: vw * k, h: vh * k };
   }
   function paint() {
-    const { d } = sizeOverlay(), x = overlay.getContext('2d');
-    x.clearRect(0, 0, overlay.width, overlay.height);
+    const r = root.getBoundingClientRect();
+    overlay.setAttribute('viewBox', `0 0 ${Math.round(r.width)} ${Math.round(r.height)}`);
+    overlay.classList.toggle('none', !quad);
     if (!quad) return;
-    const v = videoRect(), pts = quad.map(([qx, qy]) => [(v.x + qx * v.w) * d, (v.y + qy * v.h) * d]);
-    const ok = steadySince && performance.now() - steadySince > 500;
-    x.lineWidth = 4 * d; x.lineJoin = 'round';
-    x.fillStyle = ok ? 'rgba(31, 224, 138, .22)' : 'rgba(0, 240, 255, .18)'; x.strokeStyle = ok ? '#1fe08a' : '#00f0ff';
-    x.beginPath(); pts.forEach(([px, py], i) => (i ? x.lineTo(px, py) : x.moveTo(px, py))); x.closePath(); x.fill(); x.stroke();
-    for (const [px, py] of pts) { x.beginPath(); x.arc(px, py, 7 * d, 0, 6.3); x.fillStyle = '#fff'; x.fill(); }
+    const v = videoRect(), pts = quad.map(([qx, qy]) => [v.x + qx * v.w, v.y + qy * v.h]);
+    overlay.classList.toggle('ok', !!(steadySince && performance.now() - steadySince > 500));
+    ovPoly.setAttribute('points', pts.map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' '));
+    pts.forEach(([px, py], i) => { ovDots[i].setAttribute('cx', px.toFixed(1)); ovDots[i].setAttribute('cy', py.toFixed(1)); });
   }
   async function loop() {
     if (!running) return;

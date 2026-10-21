@@ -1,7 +1,7 @@
 // Editor de documento: ver páginas, recortar, filtros, girar, texto, ordenar, añadir y eliminar páginas, exportar.
 import { h, icon, toast, confirmBox, promptBox, menuSheet, openSheet, withBusy, pushLayer, safeName } from '../lib/dom.js';
-import { getDoc, saveDoc, deleteDoc } from '../core/db.js';
-import { docPages, appendPages, removePage, updatePage, updateAllPages, reorderPages, rotatePage } from '../core/docs.js';
+import { getDoc, getPage, saveDoc, deleteDoc } from '../core/db.js';
+import { docPages, appendPages, removePage, updatePage, updateAllPages, reorderPages, rotatePage, finishLater } from '../core/docs.js';
 import { blobToCanvas, scaled } from '../core/pages.js';
 import { warpQuad, rotateCanvas } from '../core/warp.js';
 import { applyFilter, FILTERS } from '../core/filters.js';
@@ -25,12 +25,15 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   const exportBtn = h('button', { class: 'btn primary small', attrs: { type: 'button' } }, icon('share', 's'), 'Exportar');
   const moreBtn = h('button', { class: 'icon-btn', attrs: { type: 'button', 'aria-label': 'Más opciones' } }, icon('more'));
   const img = h('img', { class: 'ed-img', alt: 'Página del documento', draggable: false });
-  const live = h('canvas', { class: 'ed-img ed-live', hidden: true });
-  const wrap = h('div', { class: 'ed-wrap' }, img, live);
+  // vista previa: una imagen (no un canvas): en el WebView de Android un canvas ya visible que cambia de tamaño se ve en blanco
+  const live = h('img', { class: 'ed-img ed-live', hidden: true, alt: '', draggable: false });
+  let liveTick = 0;
+  const asSrc = (c, q = 0.85) => c.toDataURL('image/jpeg', q);
+  const wrap = h('div', { class: 'ed-wrap' }, img);   // la vista previa (live) va fuera: ocupa todo el escenario aunque cambie la proporción (al girar)
   const prev = h('button', { class: 'icon-btn solid ed-nav l', attrs: { type: 'button', 'aria-label': 'Página anterior' } }, icon('back'));
   const next = h('button', { class: 'icon-btn solid ed-nav r', attrs: { type: 'button', 'aria-label': 'Página siguiente' } }, icon('next'));
   const counter = h('div', { class: 'ed-counter', attrs: { 'aria-live': 'polite' } });
-  const stage = h('div', { class: 'ed-stage' }, wrap, prev, next, counter);
+  const stage = h('div', { class: 'ed-stage' }, wrap, live, prev, next, counter);
   const strip = h('div', { class: 'ed-strip', attrs: { role: 'list', 'data-scroll': true } });
   const fbar = h('div', { class: 'ed-flt', attrs: { 'data-scroll': true, role: 'group', 'aria-label': 'Filtros' } });
   const tools = h('div', { class: 'ed-tools' });
@@ -39,7 +42,20 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     h('div', { class: 'ed-top' }, backBtn, titleBtn, exportBtn, moreBtn), stage, strip, fbar, tools, fileIn);
   document.body.append(root);
 
-  const pop = pushLayer(() => { closed = true; root.remove(); dropUrls(); onClose(); });
+  // páginas importadas en borrador: cuando su imagen completa está lista se cambia sin parpadeo (y se terminan si la app se cerró antes)
+  const onReady = async (e) => {
+    if (closed || !pages.some((p) => p.id === e.detail.id)) return;
+    if (pendingN) { work.then(() => onReady(e)); return; }         // hay un cambio en curso: se aplica cuando termine
+    const fresh = await getPage(e.detail.id), i = pages.findIndex((p) => p.id === e.detail.id);
+    if (!fresh || closed || i < 0 || pages[i].rev === fresh.rev) return;
+    Object.assign(pages[i], { out: fresh.out, thumb: fresh.thumb, w: fresh.w, h: fresh.h, rev: fresh.rev, draft: false, updatedKey: Date.now() });
+    doc = await getDoc(doc.id) || doc;
+    if (i === idx) drawStage();
+    drawStrip();
+  };
+  window.addEventListener('wilscan:page', onReady);
+  finishLater(pages);
+  const pop = pushLayer(() => { closed = true; window.removeEventListener('wilscan:page', onReady); root.remove(); dropUrls(); onClose(); });
   backBtn.addEventListener('click', () => pop());
 
   // ---------- pintar ----------
@@ -47,8 +63,15 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   function drawStage() {
     const p = cur();
     titleBtn.textContent = doc.title;
-    live.hidden = true;
-    img.src = url(p.out, 'out:' + p.id + ':' + (p.updatedKey || p.out.size));
+    // la imagen nueva se descodifica antes de quitar la vista previa: nunca se ve la anterior (ni detrás ni un instante)
+    const src = url(p.out, 'out:' + p.id + ':' + (p.updatedKey || p.out.size)), my = ++stageTick;
+    if (img.getAttribute('src') !== src) {
+      const next = new Image(); next.src = src;
+      (next.decode ? next.decode() : Promise.resolve()).catch(() => {}).then(() => {
+        if (my !== stageTick || closed) return;
+        img.src = src; img.classList.remove('under'); live.hidden = true; liveTick++;
+      });
+    } else { img.classList.remove('under'); live.hidden = true; liveTick++; }
     counter.textContent = `${idx + 1} / ${pages.length}`;
     prev.hidden = idx === 0; next.hidden = idx === pages.length - 1;
     stage.classList.toggle('zoom', zoomed);
@@ -69,7 +92,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     for (const [ic, label, fn] of defs) tools.append(h('button', { class: 'ed-tool', attrs: { type: 'button' }, on: { click: fn } }, icon(ic), h('span', { text: label })));
   }
   // Carrusel de filtros: toca uno para aplicarlo a la página (o a todas), con vista previa de cada filtro sobre la página actual
-  let filterAll = false, fbarTick = 0;
+  let filterAll = false, fbarTick = 0, stageTick = 0;
   const midCache = new Map();
   const dropSmall = (id) => { midCache.delete(id); };
   // versión reducida (≈900 px) de la página sin filtro: sirve para las vistas previas y para responder al instante al tocar un filtro. Se decodifica una sola vez.
@@ -79,7 +102,12 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     return rotateCanvas(await warpQuad(c, p.quad || null, { maxSide: 900 }), p.rot || 0);
   };
   const midOf = async (p) => { if (!midCache.has(p.id)) midCache.set(p.id, await smallBase(p)); return midCache.get(p.id); };
-  const showLive = (p, r) => { if (!r || closed || cur() !== p) return; live.width = r.width; live.height = r.height; live.getContext('2d').drawImage(r, 0, 0); live.hidden = false; };
+  const showLive = (p, r) => {
+    if (!r || closed || cur() !== p) return;
+    const my = ++liveTick;
+    live.onload = () => { if (my !== liveTick || closed || cur() !== p) return; live.hidden = false; img.classList.add('under'); };
+    live.src = asSrc(r);
+  };
   // Muestra el resultado al instante (vista previa) y genera la imagen completa detrás; al terminar todo, se refresca la página
   function inBackground(p, preview, job) {
     if (preview) Promise.resolve(preview).then((r) => showLive(p, r)).catch(() => {});
@@ -115,14 +143,14 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     }
     const canv = {};
     for (const f of FILTERS) {
-      const cv = h('canvas', { class: 'flt-prev' }); canv[f.id] = cv;
+      const cv = h('img', { class: 'flt-prev', alt: '', draggable: false }); canv[f.id] = cv;
       fbar.append(h('button', { class: 'flt' + (f.id === now ? ' on' : ''), attrs: { type: 'button', 'aria-pressed': String(f.id === now) }, on: { click: () => applyFilterTo(f.id) } }, cv, h('span', { text: f.label })));
     }
     tinyOf(p).then(async (tiny) => {
       for (const f of FILTERS) {
         const r = await applyFilter(tiny, { filter: f.id });
         if (my !== fbarTick || closed) return;
-        canv[f.id].width = r.width; canv[f.id].height = r.height; canv[f.id].getContext('2d').drawImage(r, 0, 0);
+        canv[f.id].src = asSrc(r, 0.8);
       }
     }).catch(() => {});
   }
@@ -176,10 +204,10 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     const chips = h('div', { class: 'flt-row', attrs: { 'data-scroll': true } });
     const chipEls = {};
     for (const f of FILTERS) {
-      const cv = h('canvas', { class: 'flt-prev' });
+      const cv = h('img', { class: 'flt-prev', alt: '', draggable: false });
       const b = h('button', { class: 'flt' + (f.id === sel ? ' on' : ''), attrs: { type: 'button', 'aria-pressed': String(f.id === sel) }, on: { click: () => { sel = f.id; Object.entries(chipEls).forEach(([id, el]) => { el.classList.toggle('on', id === sel); el.setAttribute('aria-pressed', String(id === sel)); }); preview(); } } }, cv, h('span', { text: f.label }));
       chipEls[f.id] = b; chips.append(b);
-      applyFilter(tiny, { filter: f.id }).then((r) => { cv.width = r.width; cv.height = r.height; cv.getContext('2d').drawImage(r, 0, 0); }).catch(() => {});
+      applyFilter(tiny, { filter: f.id }).then((r) => { cv.src = asSrc(r, 0.8); }).catch(() => {});
     }
     const sb = h('input', { type: 'range', min: -50, max: 50, step: 1, value: bright, attrs: { 'aria-label': 'Brillo' } });
     const sc = h('input', { type: 'range', min: -50, max: 50, step: 1, value: contrast, attrs: { 'aria-label': 'Contraste' } });
@@ -189,13 +217,13 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
       const my = ++tick;
       const r = await applyFilter(mid, { filter: sel, bright, contrast });
       if (my !== tick || closed) return;
-      live.width = r.width; live.height = r.height; live.getContext('2d').drawImage(r, 0, 0); live.hidden = false;
+      showLive(cur(), r);
     }
     sb.addEventListener('input', () => { bright = +sb.value; preview(); }); sc.addEventListener('input', () => { contrast = +sc.value; preview(); });
     const okBtn = h('button', { class: 'btn primary', attrs: { type: 'button' } }, icon('check', 's'), 'Aplicar');
     const body = h('div', {}, chips, h('label', { class: 'field' }, h('span', { text: 'Brillo' }), sb), h('label', { class: 'field' }, h('span', { text: 'Contraste' }), sc), pages.length > 1 ? h('label', { class: 'check' }, allChk, h('span', { text: 'Aplicar a todas las páginas' })) : null, h('div', { class: 'btn-row' }, reset));
     let applied = false;
-    const sheet = openSheet({ title: 'Filtros', body, foot: [okBtn], onClose: () => { if (!applied) live.hidden = true; } });
+    const sheet = openSheet({ title: 'Filtros', body, foot: [okBtn], onClose: () => { if (!applied) { liveTick++; live.hidden = true; img.classList.remove('under'); } } });
     sheet.el.classList.add('flt-sheet');
     okBtn.addEventListener('click', async () => {
       applied = true; sheet.close();
@@ -239,7 +267,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     const first = pages.length;
     await withBusy('Importando imágenes…', async () => {
       const items = [];
-      for (const f of files) { const bmp = await createImageBitmap(f); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close(); const big = scaled(c, 3000); items.push({ canvas: big, quad: await detectQuad(big).catch(() => null) }); }
+      for (const f of files) { const bmp = await createImageBitmap(f); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close(); const big = scaled(c, 3000); items.push({ canvas: big, quad: await detectQuad(big).catch(() => null), draft: true }); }
       await appendPages(doc, items);
     });
     await reload(first);

@@ -10,13 +10,13 @@ const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').rep
 (async () => {
   const c = await launch({ url: BASE + '/_lab/blank.html' });
   try {
-    await c.ev(`window.M = {}; Promise.all([import('${BASE}/js/core/detect.js'), import('${BASE}/js/core/warp.js'), import('${BASE}/js/core/filters.js'), import('${BASE}/js/core/ocr.js')]).then(([d,w,f,o]) => { M.d=d; M.w=w; M.f=f; M.o=o; M.load = (u) => new Promise((res)=>{const i=new Image(); i.onload=()=>{const k=document.createElement('canvas'); k.width=i.width; k.height=i.height; k.getContext('2d').drawImage(i,0,0); res(k)}; i.src=u;}); return true })`);
+    await c.ev(`window.M = {}; Promise.all([import('${BASE}/js/core/detect.js'), import('${BASE}/js/core/warp.js'), import('${BASE}/js/core/filters.js'), import('${BASE}/js/core/ocr.js'), import('${BASE}/js/core/pages.js')]).then(([d,w,f,o,p]) => { M.d=d; M.w=w; M.f=f; M.o=o; M.p=p; M.load = (u) => new Promise((res)=>{const i=new Image(); i.onload=()=>{const k=document.createElement('canvas'); k.width=i.width; k.height=i.height; k.getContext('2d').drawImage(i,0,0); res(k)}; i.src=u;}); return true })`);
     for (const [filter, name] of [['auto', 'perspectiva + Mejorado'], ['bn', 'perspectiva + Blanco y negro']]) {
       const t0 = Date.now();
-      const r = await c.ev(`(async()=>{ const img = await M.load(${JSON.stringify(fx('factura-persp.png'))}); const q = await M.d.detectQuad(img); const w = await M.w.warpQuad(img, q); const f = await M.f.applyFilter(w, {filter:${JSON.stringify(filter)}}); const prog=[]; const t=performance.now(); const o = await M.o.recognize(f, {lang:'spa+eng', onProgress:(p)=>prog.push(Math.round(p*100))}); return {text:o.text, conf:Math.round(o.confidence), words:o.words.length, sample:o.words.slice(0,3), ms:Math.round(performance.now()-t), prog: prog.length}; })()`);
+      const r = await c.ev(`(async()=>{ const img = await M.load(${JSON.stringify(fx('factura-persp.png'))}); const q = await M.d.detectQuad(img); const w = await M.w.warpQuad(img, q); const f = await M.f.applyFilter(${JSON.stringify(filter)}==='bn' ? M.p.enlarge(w) : w, {filter:${JSON.stringify(filter)}}); const prog=[]; const t=performance.now(); const o = await M.o.recognize(f, {lang:'spa+eng', onProgress:(p)=>prog.push(Math.round(p*100))}); return {text:o.text, conf:Math.round(o.confidence), words:o.words.length, sample:o.words.slice(0,3), ms:Math.round(performance.now()-t), prog: prog.length}; })()`);
       const t = norm(r.text);
       console.log(`  ${name}: ${r.ms} ms · confianza ${r.conf} · ${r.words} palabras · avisos de progreso ${r.prog}`);
-      if (filter === 'auto') console.log('  --- texto ---\n' + r.text.split('\n').map((l) => '  | ' + l).join('\n'));
+      if (filter === 'auto' || process.env.SHOW_ALL) console.log('  --- texto ---\n' + r.text.split('\n').map((l) => '  | ' + l).join('\n'));
       check(`(${name}) lee el número de factura`, /factura 2026-0042/.test(t), r.text.split('\n')[0]);
       check(`(${name}) lee el nombre con tilde`, /wilmar gomez/.test(t));
       check(`(${name}) lee el importe total`, /1\.250,00 eur/.test(t));

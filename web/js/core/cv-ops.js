@@ -132,15 +132,17 @@ export function warp(cv, img, p, W, H) {
 const odd = (n) => { n = Math.max(3, Math.round(n)); return n % 2 ? n : n + 1; };
 
 // Divide cada píxel por el fondo estimado (papel sin texto): elimina sombras y degradados de luz. Devuelve RGB.
+// Vale para color (3 canales) y para grises (1 canal: tres veces menos trabajo).
+// El fondo es una superficie lisa: se estima a ~320 px (antes 600), con el mismo resultado visual y mucho menos cálculo.
 function flatten(cv, rgb) {
-  const w = rgb.cols, h = rgb.rows, k = Math.max(1, Math.round(Math.max(w, h) / 600));
+  const w = rgb.cols, h = rgb.rows, k = Math.max(1, Math.max(w, h) / 320);
   const small = new cv.Mat(), dil = new cv.Mat(), med = new cv.Mat(), bg = new cv.Mat(), out = new cv.Mat();
-  const ker = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(7, 7));
+  const ker = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
   try {
-    cv.resize(rgb, small, new cv.Size(Math.round(w / k), Math.round(h / k)), 0, 0, cv.INTER_AREA);
+    cv.resize(rgb, small, new cv.Size(Math.max(8, Math.round(w / k)), Math.max(8, Math.round(h / k))), 0, 0, cv.INTER_AREA);
     cv.dilate(small, dil, ker);                         // el máximo local borra el texto oscuro
-    cv.medianBlur(dil, med, 21);
-    cv.GaussianBlur(med, med, new cv.Size(0, 0), 6);
+    cv.medianBlur(dil, med, 11);
+    cv.GaussianBlur(med, med, new cv.Size(0, 0), 3);
     cv.resize(med, bg, new cv.Size(w, h), 0, 0, cv.INTER_LINEAR);
     cv.divide(rgb, bg, out, 255, -1);
     return out;
@@ -175,12 +177,14 @@ export function filter(cv, img, { filter = 'auto', bright = 0, contrast = 0 } = 
     cv.cvtColor(mat, rgb, cv.COLOR_RGBA2RGB);
     if (filter === 'original') cur = rgb.clone();
     else {
-      const flat = flatten(cv, rgb);
+      const colour = filter === 'sombras' || filter === 'auto' || filter === 'color';
+      const flat = colour ? flatten(cv, rgb) : null;
       if (filter === 'sombras') cur = flat;
-      else if (filter === 'auto' || filter === 'color') { cur = sharpen(cv, flat, 0.7); free(flat); }
+      else if (colour) { cur = sharpen(cv, flat, 0.7); free(flat); }
       else {
-        const gray = new cv.Mat();
-        cv.cvtColor(flat, gray, cv.COLOR_RGB2GRAY); free(flat);
+        // grises y blanco y negro: se pasa a un canal ANTES de quitar sombras (un tercio del trabajo)
+        const g0 = new cv.Mat(); cv.cvtColor(rgb, g0, cv.COLOR_RGB2GRAY);
+        const gray = flatten(cv, g0); free(g0);
         if (filter === 'gris') { cur = gray; }
         else {   // bn
           const bw = new cv.Mat();

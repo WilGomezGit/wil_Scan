@@ -1,6 +1,6 @@
 // Hoja «Exportar / compartir» de un documento: PDF (buscable), imágenes JPG o texto.
 import { h, icon, openSheet, busy, toast, safeName } from '../lib/dom.js';
-import { docPages, docPdf, ocrPage } from '../core/docs.js';
+import { docPages, docPdf, ocrPage, ensureFull } from '../core/docs.js';
 import { sendFiles } from './send.js';
 import { getSettings, setSettings, QUALITY } from '../lib/settings.js';
 import { LANGS } from '../core/ocr.js';
@@ -47,6 +47,7 @@ export async function openExport(doc, { pages = null, mode = 'share' } = {}) {
     const b = busy('Preparando…');
     try {
       const ps = pages || await docPages(doc);
+      if (ps.some((p) => p.draft)) { b.update('Terminando las páginas…', 0); for (const p of ps) await ensureFull(p); }
       const files = [];
       if (format === 'pdf') {
         const blob = await docPdf(doc, ps, { size: size.value, margin: margin.checked, searchable: search.checked, lang: lang.value, onProgress: (f, t) => b.update(t, f) });

@@ -10,7 +10,43 @@ import { canvasOf } from './cv.js';
 import { getSettings, QUALITY } from '../lib/settings.js';
 
 const quality = () => QUALITY[getSettings().quality] || 0.9;
-const pageOpts = (it) => ({ quad: it.quad || null, filter: it.filter || getSettings().filter, quality: quality(), deskew: it.deskew !== false });
+const pageOpts = (it) => ({ quad: it.quad || null, filter: it.filter || getSettings().filter, quality: quality(), deskew: it.deskew !== false, draft: !!it.draft });
+
+// ---- Páginas en borrador ----
+// Las fotos importadas se abren con una versión a resolución de pantalla; la imagen completa se genera enseguida en segundo plano.
+// Exportar, leer el texto o unir documentos esperan a que esté lista (ensureFull). Al terminar se avisa con el evento «wilscan:page».
+let draftChain = Promise.resolve();
+const drafting = new Map();
+async function finishDraft(id) {
+  for (let i = 0; i < 4; i++) {
+    const p = await getPage(id);
+    if (!p || !p.draft) return p;
+    const rev = p.rev, full = await rerender({ ...p }, quality());
+    const cur = await getPage(id);
+    if (!cur) return null;
+    if (cur.rev !== rev) continue;                                  // se giró o cambió mientras tanto: se rehace con los ajustes nuevos
+    Object.assign(cur, { out: full.out, thumb: full.thumb, w: full.w, h: full.h, rev: full.rev, draft: false });
+    await savePage(cur);
+    if (cur.docId) { const d = await getDoc(cur.docId); if (d && d.pageIds[0] === id) { d.cover = cur.thumb; await saveDoc(d); } }
+    window.dispatchEvent(new CustomEvent('wilscan:page', { detail: { id } }));
+    ocrLater([cur]);
+    return cur;
+  }
+  return getPage(id);
+}
+export function finishLater(pages) {
+  for (const p of pages) {
+    if (!p || !p.draft || drafting.has(p.id)) continue;
+    const job = (draftChain = draftChain.then(() => finishDraft(p.id)).catch(() => null).finally(() => drafting.delete(p.id)));
+    drafting.set(p.id, job);
+  }
+}
+export async function ensureFull(page) {
+  if (!page || !page.draft) return page;
+  const done = await (drafting.get(page.id) || finishDraft(page.id));
+  if (done && !done.draft) Object.assign(page, { out: done.out, thumb: done.thumb, w: done.w, h: done.h, rev: done.rev, draft: false });
+  return page;
+}
 
 // ---- OCR en segundo plano ----
 // Con «PDF buscable» activado, el texto de las páginas se reconoce sin esperar a que se pida: así exportar es casi inmediato.
@@ -27,8 +63,10 @@ async function pumpOcr() {
   try {
     while (bgQueue.length) {
       while (fg || !cvIdleFor(2000) || document.visibilityState !== 'visible') await pause(700);
-      const id = bgQueue.shift(), lang = getSettings().ocrLang, p = await getPage(id);
-      if (!p || (p.words && p.textLang === lang)) continue;
+      if (!bgQueue.length) break;                                   // el usuario pudo pedir esas páginas mientras se esperaba
+      const id = bgQueue.shift(), lang = getSettings().ocrLang;
+      let p = null; try { p = id ? await getPage(id) : null; } catch { p = null; }
+      if (!p || p.draft || (p.words && p.textLang === lang)) continue;   // los borradores se reconocen cuando tengan la imagen completa
       bgCurrent = id;
       bgJob = (async () => {
         const rev = p.rev, canvas = await blobToCanvas(p.out);
@@ -72,7 +110,7 @@ export async function newDoc(title, items, { onProgress } = {}) {
   }
   const doc = { id, title, created: Date.now(), pageIds: pages.map((p) => p.id), pageCount: pages.length, cover: pages[0] ? pages[0].thumb : null };
   await saveDoc(doc);
-  ocrLater(pages);
+  ocrLater(pages.filter((p) => !p.draft)); finishLater(pages);
   return { doc, pages };
 }
 
@@ -88,7 +126,7 @@ export async function appendPages(doc, items) {
   const added = [];
   for (const it of items) { const p = await pageFor(doc.id, it); await savePage(p); pages.push(p); added.push(p); }
   await persistDoc(doc, pages);
-  ocrLater(added);
+  ocrLater(added.filter((p) => !p.draft)); finishLater(added);
   return pages;
 }
 
@@ -138,6 +176,7 @@ export async function ocrPage(page, { lang = getSettings().ocrLang, onProgress, 
   if (page.text != null && page.textLang === lang) return page.text;
   fg++;
   try {
+    await ensureFull(page);
     const q = bgQueue.indexOf(page.id); if (q >= 0) bgQueue.splice(q, 1);
     if (bgCurrent === page.id && bgJob) await bgJob.catch(() => {});   // ya se está reconociendo en segundo plano: se espera ese resultado
     // ¿ya lo reconoció el OCR en segundo plano? (misma versión de la imagen)
@@ -155,7 +194,7 @@ export async function ocrPage(page, { lang = getSettings().ocrLang, onProgress, 
 export async function docPdf(doc, pages, { size = getSettings().pdfSize, margin = getSettings().pdfMargin, searchable = false, lang = getSettings().ocrLang, onProgress } = {}) {
   const items = [];
   for (let i = 0; i < pages.length; i++) {
-    const p = pages[i];
+    const p = await ensureFull(pages[i]);
     if (searchable && !p.words) { await ocrPage(p, { lang, onProgress: (f) => onProgress && onProgress((i + f) / pages.length * 0.8, `Reconociendo texto · página ${i + 1} de ${pages.length}`) }); }
     items.push({ blob: p.out, w: p.w, h: p.h, words: searchable ? p.words : null });
     if (onProgress) onProgress(Math.min(0.85, (i + 1) / pages.length * 0.85), `Preparando página ${i + 1} de ${pages.length}`);
@@ -169,6 +208,7 @@ export async function mergeDocs(ids, title) {
   const docs = (await Promise.all(ids.map(getDoc))).filter(Boolean);
   const id = uid(), pageIds = [], pagesOut = [];
   for (const d of docs) for (const p of await docPages(d)) {
+    await ensureFull(p);
     const copy = { ...p, id: uid(), docId: id };
     await savePage(copy); pagesOut.push(copy);
   }
