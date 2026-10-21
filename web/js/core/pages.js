@@ -43,10 +43,10 @@ export async function measureSkew(page) {
 // La página ya recortada, enderezada y girada (antes del filtro) se guarda en memoria: cambiar de filtro o de brillo no repite la decodificación ni el recorte.
 const pre = new Map();
 export const dropPre = (id) => pre.delete(id);
-async function prepared(page, t) {
+async function prepared(page, t, srcCanvas = null) {
   const key = JSON.stringify([page.quad || null, page.skew || 0, page.rot || 0]), hit = pre.get(page.id);
   if (hit && hit.key === key) { t.step('recorte (en memoria)'); return hit.canvas; }
-  const src = await blobToCanvas(page.orig); t.step('decodificar');
+  const src = srcCanvas || await blobToCanvas(page.orig); t.step('decodificar');
   let c = await warpQuad(src, page.quad || null); t.step('recorte');
   if (page.skew) c = rotateBy(c, -page.skew);                         // enderezado por la inclinación del texto
   c = rotateCanvas(c, page.rot || 0);
@@ -57,22 +57,24 @@ async function prepared(page, t) {
 }
 
 // Genera la imagen final y la miniatura de una página a partir de su original y sus ajustes.
-export async function renderPage(page, { quality = 0.9 } = {}) {
+export async function renderPage(page, { quality = 0.9, src = null } = {}) {
   const t = timer('Página');
-  const base = await prepared(page, t);
+  const base = await prepared(page, t, src);
   const c = await applyFilter(base, { filter: page.filter || 'auto', bright: page.bright || 0, contrast: page.contrast || 0 }); t.step('filtro');
   const thumb = await toBlob(scaled(c, 420), 'image/jpeg', 0.75);
   const out = await toBlob(c, 'image/jpeg', quality); t.step('guardar JPG'); t.end();
-  return { out, thumb, w: c.width, h: c.height };
+  return { out, thumb, w: c.width, h: c.height, rev: Date.now() + Math.random() };   // rev: versión de la imagen (para saber si un OCR hecho en segundo plano sigue valiendo)
 }
 
 // Crea una página nueva desde un lienzo (foto de la cámara o imagen importada)
-export async function newPage(docId, canvas, { quad = null, filter = 'auto', quality = 0.9 } = {}) {
-  const orig = await toBlob(scaled(canvas, 3000), 'image/jpeg', 0.92);
-  const page = { id: uid(), docId, orig, quad, rot: 0, skew: 0, filter, bright: 0, contrast: 0, text: null, textLang: null, created: Date.now() };
+export async function newPage(docId, canvas, { quad = null, filter = 'auto', quality = 0.9, deskew = true } = {}) {
+  const big = scaled(canvas, 3000);
+  const origP = toBlob(big, 'image/jpeg', 0.92);                     // se codifica mientras se procesa la página (sin volver a decodificarla)
+  const page = { id: uid(), docId, orig: null, quad, rot: 0, skew: 0, filter, bright: 0, contrast: 0, text: null, textLang: null, created: Date.now() };
   // sin bordes de papel detectados: se endereza por el texto si la foto está torcida
-  if (!quad) { try { page.skew = estimateSkew(scaled(canvas, 1000)); } catch { page.skew = 0; } }
-  Object.assign(page, await renderPage(page, { quality }));
+  if (!quad && deskew) { try { page.skew = estimateSkew(scaled(canvas, 1000)); } catch { page.skew = 0; } }
+  Object.assign(page, await renderPage(page, { quality, src: big }));
+  page.orig = await origP;
   return page;
 }
 

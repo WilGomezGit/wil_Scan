@@ -43,7 +43,7 @@ export function openText(doc, pages, index) {
         if (my !== running) return;
         if (force) { ts[i].text = null; ts[i].words = null; }
         status.textContent = `Reconociendo texto… ${ts.length > 1 ? `página ${i + 1} de ${ts.length}` : ''}`;
-        await ocrPage(ts[i], { lang: lang.value, onProgress: (f) => { bar.firstChild.style.width = Math.round(((i + f) / ts.length) * 100) + '%'; } });
+        await ocrPage(ts[i], { lang: lang.value, force, onProgress: (f) => { bar.firstChild.style.width = Math.round(((i + f) / ts.length) * 100) + '%'; } });
       }
       show();
       status.textContent = area.value.trim() ? 'Puedes corregir el texto aquí mismo antes de copiarlo o compartirlo.' : 'No se encontró texto. Prueba con el filtro «Blanco y negro» o con otro idioma.';
