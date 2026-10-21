@@ -8,7 +8,7 @@ import { openScanner } from './ui/scan.js';
 import { openEditor } from './ui/editor.js';
 import { newDoc, importPdf } from './core/docs.js';
 import { detectQuad } from './core/detect.js';
-import { canvasOf } from './core/cv.js';
+import { canvasOf, loadCV } from './core/cv.js';
 import { scaled } from './core/pages.js';
 import { isNative } from './core/share.js';
 
@@ -45,7 +45,7 @@ async function importFiles(files) {
       for (let i = 0; i < imgs.length; i++) {
         b.update(`Imagen ${i + 1} de ${imgs.length}`, i / imgs.length);
         const bmp = await createImageBitmap(imgs[i]); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
-        const big = scaled(c, 3400); items.push({ canvas: big, quad: await detectQuad(big).catch(() => null) });
+        const big = scaled(c, 3000); items.push({ canvas: big, quad: await detectQuad(big).catch(() => null) });
       }
       return newDoc(imgs.length === 1 ? safeName(imgs[0].name.replace(/\.[^.]+$/, '')) : 'Importado ' + stamp(), items);
     })).doc;
@@ -76,5 +76,7 @@ async function boot() {
   window.addEventListener('drop', (e) => { if (view === 'docs' && e.dataTransfer && e.dataTransfer.files.length && !document.querySelector('.backdrop, .ed, .scan')) { e.preventDefault(); importFiles(e.dataTransfer.files); } });
   window.WilScan = { show, openDoc, startScan, importFiles };
   document.documentElement.dataset.ready = '1';
+  // el motor de imagen (13 MB) se prepara en segundo plano para que el primer escaneo o filtro no espere
+  setTimeout(() => loadCV().catch(() => {}), 1500);
 }
 boot().catch((e) => { console.error(e); toast('No se pudo iniciar la aplicación: ' + (e.message || e), 'error', 8000); });

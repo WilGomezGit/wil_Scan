@@ -54,7 +54,7 @@ export async function renderPage(page, { quality = 0.9 } = {}) {
 
 // Crea una página nueva desde un lienzo (foto de la cámara o imagen importada)
 export async function newPage(docId, canvas, { quad = null, filter = 'auto', quality = 0.9 } = {}) {
-  const orig = await toBlob(scaled(canvas, 3400), 'image/jpeg', 0.92);
+  const orig = await toBlob(scaled(canvas, 3000), 'image/jpeg', 0.92);
   const page = { id: uid(), docId, orig, quad, rot: 0, skew: 0, filter, bright: 0, contrast: 0, text: null, textLang: null, created: Date.now() };
   // sin bordes de papel detectados: se endereza por el texto si la foto está torcida
   if (!quad) { try { page.skew = estimateSkew(scaled(canvas, 1000)); } catch { page.skew = 0; } }

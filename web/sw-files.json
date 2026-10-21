@@ -1,5 +1,5 @@
 {
- "version": "f979dad3fd",
+ "version": "7ec20833ce",
  "shell": [
   "./",
   "assets/icon-192.png",
@@ -16,6 +16,8 @@
   "css/tools.css",
   "index.html",
   "js/core/camera.js",
+  "js/core/cv-ops.js",
+  "js/core/cv-worker.js",
   "js/core/cv.js",
   "js/core/db.js",
   "js/core/deskew.js",

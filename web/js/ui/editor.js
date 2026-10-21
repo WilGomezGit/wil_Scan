@@ -32,10 +32,11 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   const counter = h('div', { class: 'ed-counter', attrs: { 'aria-live': 'polite' } });
   const stage = h('div', { class: 'ed-stage' }, wrap, prev, next, counter);
   const strip = h('div', { class: 'ed-strip', attrs: { role: 'list', 'data-scroll': true } });
+  const fbar = h('div', { class: 'ed-flt', attrs: { 'data-scroll': true, role: 'group', 'aria-label': 'Filtros' } });
   const tools = h('div', { class: 'ed-tools' });
   const fileIn = h('input', { type: 'file', accept: 'image/*,application/pdf', multiple: true, hidden: true });
   const root = h('div', { class: 'ed', attrs: { role: 'dialog', 'aria-label': 'Editor de documento' } },
-    h('div', { class: 'ed-top' }, backBtn, titleBtn, exportBtn, moreBtn), stage, strip, tools, fileIn);
+    h('div', { class: 'ed-top' }, backBtn, titleBtn, exportBtn, moreBtn), stage, strip, fbar, tools, fileIn);
   document.body.append(root);
 
   const pop = pushLayer(() => { closed = true; root.remove(); dropUrls(); onClose(); });
@@ -67,7 +68,48 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     const defs = [['crop', 'Recortar', doCrop], ['filter', 'Filtros', () => doFilters(false)], ['rotate', 'Girar', doRotate], ['text', 'Texto', () => openText(doc, pages, idx)], ['layers', 'Ordenar', doOrder], ['trash', 'Eliminar', doDeletePage]];
     for (const [ic, label, fn] of defs) tools.append(h('button', { class: 'ed-tool', attrs: { type: 'button' }, on: { click: fn } }, icon(ic), h('span', { text: label })));
   }
-  const refresh = () => { drawStage(); drawStrip(); };
+  // Carrusel de filtros: toca uno para aplicarlo a la página (o a todas), con vista previa de cada filtro sobre la página actual
+  let filterAll = false, fbarTick = 0;
+  const tinyCache = new Map();
+  async function tinyOf(p) {
+    if (!tinyCache.has(p.id)) {
+      const bmp = await createImageBitmap(p.orig, { resizeWidth: 700 });
+      const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
+      tinyCache.set(p.id, rotateCanvas(await warpQuad(c, p.quad || null, { maxSide: 160 }), p.rot || 0));
+    }
+    return tinyCache.get(p.id);
+  }
+  async function applyFilterTo(id) {
+    const p = cur(); if ((p.filter || 'auto') === id && !filterAll) return;
+    const all = filterAll && pages.length > 1;
+    await withBusy(all ? 'Aplicando a todas las páginas…' : 'Aplicando filtro…', async () => {
+      if (all) pages = await updateAllPages(doc, { filter: id }); else await updatePage(p, { filter: id });
+    });
+    for (const q of pages) q.updatedKey = Date.now() + Math.random();
+    doc = await getDoc(doc.id); await commit(); refresh();
+  }
+  function drawFilterBar() {
+    const p = cur(), my = ++fbarTick, now = p.filter || 'auto';
+    fbar.textContent = '';
+    if (pages.length > 1) {
+      const chk = h('input', { type: 'checkbox', checked: filterAll });
+      chk.addEventListener('change', () => { filterAll = chk.checked; });
+      fbar.append(h('label', { class: 'all' }, chk, h('span', { text: 'Todas' })));
+    }
+    const canv = {};
+    for (const f of FILTERS) {
+      const cv = h('canvas', { class: 'flt-prev' }); canv[f.id] = cv;
+      fbar.append(h('button', { class: 'flt' + (f.id === now ? ' on' : ''), attrs: { type: 'button', 'aria-pressed': String(f.id === now) }, on: { click: () => applyFilterTo(f.id) } }, cv, h('span', { text: f.label })));
+    }
+    tinyOf(p).then(async (tiny) => {
+      for (const f of FILTERS) {
+        const r = await applyFilter(tiny, { filter: f.id });
+        if (my !== fbarTick || closed) return;
+        canv[f.id].width = r.width; canv[f.id].height = r.height; canv[f.id].getContext('2d').drawImage(r, 0, 0);
+      }
+    }).catch(() => {});
+  }
+  const refresh = () => { drawStage(); drawStrip(); drawFilterBar(); };
   function go(i) { idx = Math.max(0, Math.min(pages.length - 1, i)); zoomed = false; refresh(); }
   prev.addEventListener('click', () => go(idx - 1)); next.addEventListener('click', () => go(idx + 1));
   img.addEventListener('dblclick', () => { zoomed = !zoomed; stage.classList.toggle('zoom', zoomed); });
@@ -85,12 +127,12 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     const p = cur();
     const q = await openCropper(p);
     if (q === undefined) return;
-    await withBusy('Recortando…', () => updatePage(p, { quad: q, skew: q ? 0 : p.skew }));
+    await withBusy('Recortando…', () => updatePage(p, { quad: q, skew: q ? 0 : p.skew })); tinyCache.delete(p.id);
     p.updatedKey = Date.now(); if (idx === 0) await commit(); refresh();
   }
   async function doRotate() {
     const p = cur();
-    await withBusy('Girando…', () => updatePage(p, { rot: ((p.rot || 0) + 90) % 360 }));
+    await withBusy('Girando…', () => updatePage(p, { rot: ((p.rot || 0) + 90) % 360 })); tinyCache.delete(p.id);
     p.updatedKey = Date.now(); if (idx === 0) await commit(); refresh();
   }
   async function doDeletePage() {
@@ -176,7 +218,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     const first = pages.length;
     await withBusy('Importando imágenes…', async () => {
       const items = [];
-      for (const f of files) { const bmp = await createImageBitmap(f); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close(); const big = scaled(c, 3400); items.push({ canvas: big, quad: await detectQuad(big).catch(() => null) }); }
+      for (const f of files) { const bmp = await createImageBitmap(f); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close(); const big = scaled(c, 3000); items.push({ canvas: big, quad: await detectQuad(big).catch(() => null) }); }
       await appendPages(doc, items);
     });
     await reload(first);

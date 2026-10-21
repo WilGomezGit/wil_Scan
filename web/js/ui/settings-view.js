@@ -32,7 +32,7 @@ export function initSettings() {
     h('div', { class: 'set-cols' },
       h('div', {},
         h('div', { class: 'section-title', text: 'Escaneo' }),
-        h('div', { class: 'card pad' }, sel('Filtro para las fotos nuevas', FILTERS.map((f) => [f.id, f.label]), 'filter'), chk('Disparo automático al detectar el documento', 'autoCapture', 'Hace la foto solo cuando el documento está quieto y bien encuadrado.'), chk('Vibrar al hacer una foto', 'haptics')),
+        h('div', { class: 'card pad' }, sel('Filtro para las fotos nuevas', FILTERS.map((f) => [f.id, f.label]), 'filter'), chk('Revisar el recorte después de cada foto', 'reviewCrop', 'Ajusta las esquinas y confirma, o repite la foto. Con el disparo automático no se muestra.'), chk('Disparo automático al detectar el documento', 'autoCapture', 'Hace la foto solo cuando el documento está quieto y bien encuadrado.'), chk('Vibrar al hacer una foto', 'haptics')),
         h('div', { class: 'section-title', text: 'Texto (OCR)' }),
         h('div', { class: 'card pad' }, sel('Idioma de los documentos', LANGS.map((l) => [l.id, l.label]), 'ocrLang'), h('p', { class: 'hint', text: 'El reconocimiento de texto funciona sin conexión; los idiomas van incluidos en la app.' })),
         h('div', { class: 'section-title', text: 'PDF' }),

@@ -12,7 +12,8 @@ function isConvex(q) {
 }
 
 // Devuelve una promesa: el quad nuevo (4 puntos normalizados), null si se elige «toda la imagen», o undefined si se cancela.
-export function openCropper(page) {
+// page: { orig (Blob) o canvas (lienzo), quad }. opts: { ok, cancel, title, hint } para cambiar los textos (p. ej. «Confirmar» / «Repetir»).
+export function openCropper(page, opts = {}) {
   return new Promise(async (resolve) => {
     let result, done = false, q = page.quad ? page.quad.map((p) => [...p]) : null, drag = -1, dims = { w: 1, h: 1 };
     const stage = h('div', { class: 'crop-stage' });
@@ -23,17 +24,17 @@ export function openCropper(page) {
     stage.append(img, svg);
     const autoBtn = h('button', { class: 'btn', attrs: { type: 'button' } }, icon('wand', 's'), 'Auto');
     const allBtn = h('button', { class: 'btn', attrs: { type: 'button' } }, icon('crop', 's'), 'Toda la imagen');
-    const cancelBtn = h('button', { class: 'btn', attrs: { type: 'button' }, text: 'Cancelar' });
-    const okBtn = h('button', { class: 'btn primary', attrs: { type: 'button' } }, icon('check', 's'), 'Aplicar');
+    const cancelBtn = h('button', { class: 'btn', attrs: { type: 'button' }, text: opts.cancel || 'Cancelar' });
+    const okBtn = h('button', { class: 'btn primary', attrs: { type: 'button' } }, icon('check', 's'), opts.ok || 'Aplicar');
     const root = h('div', { class: 'crop', attrs: { role: 'dialog', 'aria-label': 'Recortar' } },
-      h('div', { class: 'crop-bar' }, h('strong', { text: 'Ajusta las esquinas' }), h('span', { class: 'hint', text: 'Arrastra los puntos hasta los bordes del documento' })),
+      h('div', { class: 'crop-bar' }, h('strong', { text: opts.title || 'Ajusta las esquinas' }), h('span', { class: 'hint', text: opts.hint || 'Arrastra los puntos hasta los bordes del documento' })),
       stage, h('div', { class: 'crop-foot' }, autoBtn, allBtn, cancelBtn, okBtn));
     document.body.append(root);
     const finish = (v) => { if (done) return; done = true; root.remove(); window.removeEventListener('resize', layout); resolve(v); };
     const pop = pushLayer(() => finish(result));
     cancelBtn.addEventListener('click', () => pop());
 
-    const src = scaled(await blobToCanvas(page.orig), 1600);
+    const src = scaled(page.canvas || await blobToCanvas(page.orig), 1600);
     dims = { w: src.width, h: src.height };
     if (!q) { try { q = await detectQuad(src, { maxSide: 520 }); } catch { q = null; } if (!q) q = full(); }
 
