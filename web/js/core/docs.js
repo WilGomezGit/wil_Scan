@@ -9,11 +9,29 @@ import { getSettings, QUALITY } from '../lib/settings.js';
 
 const quality = () => QUALITY[getSettings().quality] || 0.9;
 
+// Procesa una foto (recorte, filtro, miniatura) a partir de { canvas, quad, filter }. Lo usa el escáner para ir trabajando mientras se sigue fotografiando.
+export const startPage = (it) => newPage('pendiente', it.canvas, { quad: it.quad || null, filter: it.filter || getSettings().filter, quality: quality() });
+
+// Cambia el recorte de una foto ya procesada y la vuelve a generar
+export async function recropPage(page, quad) {
+  page.quad = quad; if (quad) page.skew = 0;
+  return rerender(page, quality());
+}
+
+// Página lista de un elemento del escáner: la que ya se procesó en segundo plano, o se procesa ahora
+async function pageFor(docId, it) {
+  let p = null;
+  if (it.page) { try { p = await it.page; } catch { p = null; } }
+  if (!p) p = await newPage(docId, it.canvas, { quad: it.quad || null, filter: it.filter || getSettings().filter, quality: quality() });
+  p.docId = docId;
+  return p;
+}
+
 export async function newDoc(title, items, { onProgress } = {}) {
   const id = uid(), pages = [];
   for (let i = 0; i < items.length; i++) {
     const it = items[i];
-    const p = await newPage(id, it.canvas, { quad: it.quad || null, filter: it.filter || getSettings().filter, quality: quality() });
+    const p = await pageFor(id, it);
     await savePage(p); pages.push(p);
     if (onProgress) onProgress((i + 1) / items.length);
   }
@@ -31,7 +49,7 @@ export async function persistDoc(doc, pages) {
 
 export async function appendPages(doc, items) {
   const pages = await docPages(doc);
-  for (const it of items) { const p = await newPage(doc.id, it.canvas, { quad: it.quad || null, filter: it.filter || getSettings().filter, quality: quality() }); await savePage(p); pages.push(p); }
+  for (const it of items) { const p = await pageFor(doc.id, it); await savePage(p); pages.push(p); }
   await persistDoc(doc, pages);
   return pages;
 }

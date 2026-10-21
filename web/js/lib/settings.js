@@ -7,6 +7,7 @@ export const DEFAULTS = {
   pdfMargin: true,
   quality: 'high',         // normal | high | max
   searchablePdf: true,     // PDF con texto buscable (usa OCR)
+  reviewCrop: true,        // tras cada foto, mostrar el recorte para confirmarlo o repetir
   autoCapture: false,      // dispara solo cuando el documento está quieto y encuadrado
   filter: 'auto',          // filtro por defecto de las fotos nuevas
   haptics: true,

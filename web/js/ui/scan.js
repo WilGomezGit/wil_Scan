@@ -1,11 +1,13 @@
 // Escáner: cámara a pantalla completa con detección de bordes en vivo, disparo manual o automático, lotes y documento de identidad.
-import { h, icon, toast, confirmBox, pushLayer } from '../lib/dom.js';
+import { h, icon, toast, confirmBox, menuSheet, pushLayer, withBusy } from '../lib/dom.js';
 import { Camera } from '../core/camera.js';
 import { detectQuad } from '../core/detect.js';
 import { loadCV, canvasOf } from '../core/cv.js';
 import { warpQuad } from '../core/warp.js';
 import { scaled } from '../core/pages.js';
-import { composeIdSheet } from '../core/docs.js';
+import { composeIdSheet, startPage, recropPage } from '../core/docs.js';
+import { uid } from '../core/db.js';
+import { openCropper } from './crop.js';
 import { getSettings, setSettings } from '../lib/settings.js';
 
 const MAX = 3000;                          // lado máximo que se guarda de cada foto
@@ -13,7 +15,7 @@ const delta = (a, b) => Math.max(...a.map((p, i) => Math.hypot(p[0] - b[i][0], p
 
 // opts: { title?, onDone(items, { mode }) , onCancel() }
 export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } = {}) {
-  let mode = startMode, items = [], idFront = null, cam = null, quad = null, history = [], steadySince = 0, firedFor = 0, running = true, detecting = false, shooting = false, finished = false;
+  let mode = startMode, items = [], retake = -1, queue = Promise.resolve(), idFront = null, cam = null, quad = null, history = [], steadySince = 0, firedFor = 0, running = true, detecting = false, shooting = false, finished = false;
   const st = getSettings();
   let auto = !!st.autoCapture;
 
@@ -30,12 +32,13 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
   const closeBtn = h('button', { class: 'icon-btn solid', attrs: { type: 'button', 'aria-label': 'Cerrar el escáner' } }, icon('close'));
   const autoBtn = h('button', { class: 'chip scan-chip' + (auto ? ' on' : ''), attrs: { type: 'button', 'aria-pressed': String(auto) }, text: 'Auto' });
   const modeSeg = h('div', { class: 'scan-modes', attrs: { role: 'tablist' } });
+  const strip = h('div', { class: 'scan-strip', hidden: true, attrs: { role: 'list', 'data-scroll': true } });
   const msg = h('div', { class: 'scan-msg', hidden: true });
   const root = h('div', { class: 'scan', attrs: { role: 'dialog', 'aria-label': 'Escáner de documentos' } },
     video, overlay, flashFx,
     h('div', { class: 'scan-top' }, closeBtn, h('div', { class: 'grow' }), autoBtn, flashBtn, flipBtn),
     hint, msg,
-    h('div', { class: 'scan-bottom' }, h('div', { class: 'scan-modes-wrap' }, modeSeg), h('div', { class: 'scan-controls' }, galleryBtn, shutter, thumb), galleryIn));
+    h('div', { class: 'scan-bottom' }, strip, h('div', { class: 'scan-modes-wrap' }, modeSeg), h('div', { class: 'scan-controls' }, galleryBtn, shutter, thumb), galleryIn));
   document.body.append(root);
 
   const drawModes = () => {
@@ -52,10 +55,49 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
     thumb.textContent = ''; thumb.classList.remove('half');
     thumb.disabled = !items.length;
     if (items.length) {
-      const last = items[items.length - 1], c = canvasOf(96, 96 * last.canvas.height / last.canvas.width); c.getContext('2d').drawImage(last.canvas, 0, 0, c.width, c.height);
+      const last = items[items.length - 1], c = canvasOf(96, 96 * last.thumb.height / last.thumb.width); c.getContext('2d').drawImage(last.thumb, 0, 0, c.width, c.height);
       thumb.append(c, h('span', { class: 'scan-count', text: String(items.length) }), h('span', { class: 'scan-ok' }, icon('check', 's')));
     }
   };
+
+  // ---- páginas escaneadas: se van procesando en segundo plano mientras se sigue fotografiando ----
+  function makeItem(canvas, quad) {
+    const it = { id: uid(), canvas, quad, ready: false, dead: false };
+    it.thumb = canvasOf(110, 110 * canvas.height / canvas.width); it.thumb.getContext('2d').drawImage(canvas, 0, 0, it.thumb.width, it.thumb.height);
+    process(it);
+    return it;
+  }
+  function process(it) {
+    it.ready = false;
+    // de una en una: así no se acumulan fotos grandes en memoria
+    it.page = queue = queue.then(() => (it.dead ? null : startPage(it))).then((p) => { it.ready = !!p; if (p && !it.dead) it.canvas = null; drawStrip(); return p; }).catch(() => { drawStrip(); return null; });
+  }
+  function drawStrip() {
+    strip.textContent = ''; strip.hidden = !items.length;
+    items.forEach((it, i) => {
+      strip.append(h('button', { class: 'scan-th' + (it.ready ? ' ok' : ' wait') + (i === retake ? ' retake' : ''), attrs: { type: 'button', role: 'listitem', 'aria-label': `Página ${i + 1}` + (it.ready ? '' : ' (procesando)') }, on: { click: () => itemMenu(i) } },
+        it.thumb, h('span', { class: 'n', text: String(i + 1) }), h('span', { class: 'st' }, it.ready ? icon('check', 's') : h('i', { class: 'scan-spin' }))));
+    });
+    strip.scrollLeft = strip.scrollWidth;
+    drawThumb();
+  }
+  function itemMenu(i) {
+    const it = items[i]; if (!it) return;
+    menuSheet(`Página ${i + 1}`, [
+      { icon: 'crop', label: 'Recortar', run: () => recropItem(it) },
+      { icon: 'scan', label: 'Repetir esta foto', run: () => { retake = i; drawStrip(); setHint(`Haz de nuevo la foto de la página ${i + 1}`); } },
+      { icon: 'trash', label: 'Eliminar', danger: true, run: () => { it.dead = true; items = items.filter((x) => x !== it); retake = -1; drawStrip(); setHint(); } },
+    ]);
+  }
+  async function recropItem(it) {
+    const page = await withBusy('Abriendo…', () => it.page);
+    const target = page || { canvas: it.canvas, quad: it.quad };
+    const q = await openCropper(target, { title: 'Recortar la página', ok: 'Aplicar' });
+    if (q === undefined) return;
+    it.quad = q; it.ready = false; drawStrip();
+    if (page) it.page = queue = queue.then(() => recropPage(page, q)).then((p) => { it.ready = true; drawStrip(); return p; }).catch(() => null);
+    else process(it);
+  }
 
   // ---- cámara ----
   const showError = (title, text) => {
@@ -124,18 +166,24 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
 
   // ---- capturar / importar ----
   const buzz = () => { try { if (getSettings().haptics && navigator.vibrate && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) navigator.vibrate(25); } catch { /* sin vibración */ } };
-  async function addCanvas(c) {
+  async function addCanvas(c, { review = false } = {}) {
     const big = scaled(c, MAX);
     let q = null;
     try { q = await detectQuad(big, { maxSide: 520 }); } catch { /* sin detección: se usa la imagen entera */ }
+    if (review) {                                          // como en CamScanner: ajustar las esquinas y confirmar, o repetir la foto
+      const r = await openCropper({ canvas: big, quad: q }, { title: 'Revisa el recorte', hint: 'Ajusta las esquinas o confirma', ok: 'Confirmar', cancel: 'Repetir' });
+      if (r === undefined) { setHint('Foto descartada: haz otra'); return; }
+      q = r;
+    }
     if (mode === 'id') {
       const flat = await warpQuad(big, q);
       if (!idFront) { idFront = flat; setHint('Ahora el REVERSO del documento'); drawThumb2(flat); return; }
       const sheet = composeIdSheet(idFront, flat); idFront = null;
-      items.push({ canvas: sheet, quad: null }); setHint('Documento de identidad listo');
-    } else items.push({ canvas: big, quad: q });
-    drawThumb(); setHint();
+      add(makeItem(sheet, null)); setHint('Documento de identidad listo');
+    } else add(makeItem(big, q));
+    drawStrip(); setHint();
   }
+  function add(it) { if (retake >= 0 && items[retake]) { items[retake].dead = true; items[retake] = it; retake = -1; } else items.push(it); }
   function drawThumb2(c) { thumb.textContent = ''; thumb.disabled = false; thumb.classList.add('half'); const t = canvasOf(96, 96 * c.height / c.width); t.getContext('2d').drawImage(c, 0, 0, t.width, t.height); thumb.append(t, h('span', { class: 'scan-count', text: '1/2' })); }
   async function capture(fromAuto = false) {
     if (shooting || !cam || !cam.stream) return;
@@ -143,7 +191,7 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
     try {
       flashFx.classList.remove('go'); void flashFx.offsetWidth; flashFx.classList.add('go'); buzz();
       const c = await cam.capture();
-      await addCanvas(c);
+      await addCanvas(c, { review: !fromAuto && mode === 'doc' && !!getSettings().reviewCrop });
       history = []; steadySince = 0; quad = null; paint();
     } catch (e) { toast('No se pudo hacer la foto. Inténtalo otra vez.', 'error'); }
     shooting = false; shutter.disabled = false;
@@ -177,7 +225,7 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
 
   closeBtn.addEventListener('click', async () => {
     if (items.length && !(await confirmBox({ title: '¿Salir sin guardar?', text: `Tienes ${items.length} ${items.length === 1 ? 'página escaneada' : 'páginas escaneadas'}. Si sales ahora se descartarán.`, ok: 'Salir y descartar', danger: true }))) return;
-    items = []; finish();
+    items.forEach((i) => { i.dead = true; }); items = []; finish();
   });
   thumb.addEventListener('click', () => { if (items.length) finish(); });
   shutter.addEventListener('click', () => capture(false));

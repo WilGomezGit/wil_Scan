@@ -58,3 +58,10 @@ body:has(.flt-sheet) .backdrop .sheet { pointer-events: auto; }
 .ord img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; background: #fff; }
 .ord-bar { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px; font-weight: 700; }
 .ord-bar .icon-btn { width: 40px; height: 40px; }
+
+/* carrusel de filtros del editor */
+.ed-flt { display: flex; align-items: center; gap: 8px; padding: 8px calc(10px + var(--safe-r)) 6px calc(10px + var(--safe-l)); overflow-x: auto; border-top: 1px solid var(--line); background: var(--bg2); scrollbar-width: none; }
+.ed-flt::-webkit-scrollbar { display: none; }
+.ed-flt .flt { width: 62px; padding: 4px; gap: 4px; font-size: 11px; }
+.ed-flt .flt-prev { width: 50px; height: 62px; }
+.ed-flt .all { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 8px; font-size: 11px; color: var(--mut); }
