@@ -176,7 +176,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     const first = pages.length;
     await withBusy('Importando imágenes…', async () => {
       const items = [];
-      for (const f of files) { const bmp = await createImageBitmap(f); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close(); const big = scaled(c, 3400); items.push({ canvas: big, quad: await detectQuad(big).catch(() => null) }); }
+      for (const f of files) { const bmp = await createImageBitmap(f); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close(); const big = scaled(c, 3000); items.push({ canvas: big, quad: await detectQuad(big).catch(() => null) }); }
       await appendPages(doc, items);
     });
     await reload(first);

@@ -8,7 +8,7 @@ import { scaled } from '../core/pages.js';
 import { composeIdSheet } from '../core/docs.js';
 import { getSettings, setSettings } from '../lib/settings.js';
 
-const MAX = 3400;                          // lado máximo que se guarda de cada foto
+const MAX = 3000;                          // lado máximo que se guarda de cada foto
 const delta = (a, b) => Math.max(...a.map((p, i) => Math.hypot(p[0] - b[i][0], p[1] - b[i][1])));
 
 // opts: { title?, onDone(items, { mode }) , onCancel() }
