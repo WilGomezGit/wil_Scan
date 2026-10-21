@@ -1,0 +1,44 @@
+name: APK Android
+on:
+  pull_request:
+    paths: ['web/**', 'android/**', 'capacitor.config.json', 'package*.json', '.github/workflows/android.yml']
+  workflow_dispatch:
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      # clave de depuración estable entre compilaciones (sin ella cada APK tendría otra firma y no se podría actualizar encima)
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: wilscan-debug-keystore-v1
+      - run: npm ci
+      - run: node tools/stage.js
+      - run: npx cap sync android
+      - name: Compilar el APK
+        working-directory: android
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_NAME: ${{ secrets.ANDROID_KEYSTORE_FILE }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KS_KEYPASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          if [ -n "$KS_B64" ]; then
+            mkdir -p ../android-keystore
+            echo "$KS_B64" | base64 -d > "../android-keystore/${KS_NAME:-release.jks}"
+            printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "${KS_NAME:-release.jks}" "$KS_PASS" "$KS_ALIAS" "${KS_KEYPASS:-$KS_PASS}" > ../android-keystore/keystore.properties
+            ./gradlew assembleRelease
+          else
+            ./gradlew assembleDebug
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WilScan-APK
+          path: android/app/build/outputs/apk/**/*.apk
