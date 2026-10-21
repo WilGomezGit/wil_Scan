@@ -1,5 +1,5 @@
 {
- "version": "78b47747a1",
+ "version": "677c58ed79",
  "shell": [
   "./",
   "assets/icon-192.png",
@@ -29,6 +29,7 @@
   "js/core/pages.js",
   "js/core/pdf-export.js",
   "js/core/pdf-tools.js",
+  "js/core/pool.js",
   "js/core/qr.js",
   "js/core/share.js",
   "js/core/warp.js",

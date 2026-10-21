@@ -44,13 +44,14 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   document.body.append(root);
 
   // páginas importadas en borrador: cuando su imagen completa está lista se cambia sin parpadeo (y se terminan si la app se cerró antes)
+  let previewing = false; const deferred = [];                    // mientras la hoja de filtros enseña su vista previa no se cambia la imagen de fondo
   const onReady = async (e) => {
+    if (previewing) { deferred.push(e); return; }
     if (closed || !pages.some((p) => p.id === e.detail.id)) return;
     if (pendingN) { work.then(() => onReady(e)); return; }         // hay un cambio en curso: se aplica cuando termine
     const fresh = await getPage(e.detail.id), i = pages.findIndex((p) => p.id === e.detail.id);
     if (!fresh || closed || i < 0 || pages[i].rev === fresh.rev) return;
     Object.assign(pages[i], { out: fresh.out, thumb: fresh.thumb, w: fresh.w, h: fresh.h, rev: fresh.rev, draft: false, updatedKey: Date.now() });
-    doc = await getDoc(doc.id) || doc;
     if (i === idx) drawStage();
     drawStrip();
   };
@@ -234,7 +235,8 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     const okBtn = h('button', { class: 'btn primary', attrs: { type: 'button' } }, icon('check', 's'), 'Aplicar');
     const body = h('div', {}, chips, h('label', { class: 'field' }, h('span', { text: 'Brillo' }), sb), h('label', { class: 'field' }, h('span', { text: 'Contraste' }), sc), pages.length > 1 ? h('label', { class: 'check' }, allChk, h('span', { text: 'Aplicar a todas las páginas' })) : null, h('div', { class: 'btn-row' }, reset));
     let applied = false;
-    const sheet = openSheet({ title: 'Filtros', body, foot: [okBtn], onClose: () => { if (!applied) { liveTick++; live.hidden = true; img.classList.remove('under'); } } });
+    previewing = true;
+    const sheet = openSheet({ title: 'Filtros', body, foot: [okBtn], onClose: () => { previewing = false; if (!applied) { liveTick++; live.hidden = true; img.classList.remove('under'); } deferred.splice(0).forEach(onReady); } });
     sheet.el.classList.add('flt-sheet');
     okBtn.addEventListener('click', async () => {
       applied = true; sheet.close();
@@ -277,8 +279,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     if (!files.length) return;
     const first = pages.length;
     await withBusy('Importando imágenes…', async () => {
-      const items = [];
-      for (const f of files) { const bmp = await createImageBitmap(f); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close(); const big = scaled(c, 3000); items.push({ canvas: big, quad: await detectQuad(big).catch(() => null), draft: true }); }
+      const items = files.map((f) => ({ draft: true, make: async () => { const bmp = await createImageBitmap(f); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close(); const big = scaled(c, 3000); return { canvas: big, quad: await detectQuad(big).catch(() => null), draft: true }; } }));
       await appendPages(doc, items);
     });
     await reload(first);

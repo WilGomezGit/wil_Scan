@@ -42,6 +42,36 @@ export async function listDocs() {
 }
 export async function getDoc(id) { const db = await open(); return req(db.transaction('docs').objectStore('docs').get(id)); }
 export const saveDoc = (doc) => run('docs', 'readwrite', (s) => s.put({ ...doc, updated: Date.now() }));
+// Leer-modificar-escribir en una sola transacción: así un proceso en segundo plano no pisa un cambio hecho a la vez por el usuario.
+// fn(registro) devuelve true (se guarda el registro modificado), un objeto nuevo (se guarda ese) o false (no se toca). Devuelve lo guardado, o null.
+function patch(store, id, fn) {
+  return open().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite'), st = tx.objectStore(store);
+    let out = null;
+    const g = st.get(id);
+    g.onsuccess = () => { if (!g.result) return; const next = fn(g.result); if (next) { out = next === true ? g.result : next; st.put(store === 'docs' ? { ...out, updated: Date.now() } : out); } };
+    tx.oncomplete = () => resolve(out);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('Operación cancelada'));
+  }));
+}
+export const patchDoc = (id, fn) => patch('docs', id, fn);
+export const patchPage = (id, fn) => patch('pages', id, fn);
+
+// Borra las páginas que no pertenecen a ningún documento (quedan si la app se cierra en medio de una importación). Solo se llama al arrancar.
+export async function purgeOrphanPages() {
+  const db = await open();
+  const ids = new Set(await req(db.transaction('docs').objectStore('docs').getAllKeys()));
+  const tx = db.transaction('pages', 'readwrite'), st = tx.objectStore('pages');
+  let n = 0;
+  await new Promise((resolve, reject) => {
+    const cur = st.index('docId').openKeyCursor();
+    cur.onsuccess = () => { const c = cur.result; if (!c) return resolve(); if (!ids.has(c.key)) { st.delete(c.primaryKey); n++; } c.continue(); };
+    cur.onerror = () => reject(cur.error);
+  });
+  return n;
+}
+
 export async function deleteDoc(id) {
   const db = await open();
   const tx = db.transaction(['docs', 'pages'], 'readwrite');

@@ -226,7 +226,7 @@ G.paginas = async () => {
   await clickText('.ed-tool', 'Eliminar');
   await wf(() => exists('.sheet'), 4000);
   await clickText('.sheet-foot .btn', 'Eliminar');
-  await sleep(700);
+  await wf(async () => (await text('.ed-counter')) === '1 / 1', 10000, 200); await sleep(200);
   check('«Eliminar» quita la página (queda 1 / 1)', (await text('.ed-counter')) === '1 / 1' && (await dbPages()).length === 1);
   // añadir páginas importando imágenes
   await click('.ed-thumb.add');
@@ -267,7 +267,8 @@ G.biblioteca = async () => {
   await shot('08-seleccion'); await audit('selección múltiple (móvil)');
   await clickText('.selbar .btn', 'Unir'); await wf(() => exists('.sheet input'), 4000);
   await c.ev(`(()=>{document.querySelector('.sheet input').value='Todo junto'; return true})()`);
-  await clickText('.sheet-foot .btn', 'Guardar'); await sleep(1500);
+  await clickText('.sheet-foot .btn', 'Guardar');
+  await wf(async () => (await dbDocs()).some((d) => d.title === 'Todo junto'), 30000, 300); await sleep(300);   // unir espera a que las páginas en borrador terminen
   const docs = await dbDocs();
   check('«Unir» crea un documento con las 4 páginas (3 + 1)', docs.length === 3 && docs.some((d) => d.title === 'Todo junto' && d.pageCount === 4), j(docs.map((d) => [d.title, d.pageCount])));
   // eliminar seleccionados

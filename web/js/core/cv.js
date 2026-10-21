@@ -13,13 +13,13 @@ function workerEngine() {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') return reject(new Error('sin Worker'));
     const tw = performance.now();
-    const w = new Worker(new URL('./cv-worker.js', import.meta.url));
+    const w = new Worker(new URL('./cv-worker.js', import.meta.url)); w.__h = null;
     const pending = new Map();
     let seq = 0, ready = false;
     const failAll = (err) => { for (const p of pending.values()) p.reject(err); pending.clear(); };
     w.onmessage = (e) => {
       const m = e.data;
-      if (m.ready) { ready = true; perf.engine = `Worker (segundo plano) · listo en ${Math.round(performance.now() - tw)} ms` + (m.ms ? ` (leer ${m.ms.leer} · iniciar ${m.ms.iniciar})` : ''); resolve({ run: (op, args, transfer) => new Promise((res, rej) => { const id = ++seq; pending.set(id, { resolve: res, reject: rej, op, t0: performance.now() }); w.postMessage({ id, op, args }, transfer || []); }) }); return; }
+      if (m.ready) { ready = true; perf.engine = `Worker (segundo plano) · listo en ${Math.round(performance.now() - tw)} ms` + (m.ms ? ` (leer ${m.ms.leer} · iniciar ${m.ms.iniciar})` : ''); const h = w.__h = { dead: false, last: performance.now(), busy: () => pending.size, stop: () => { h.dead = true; w.terminate(); failAll(new Error('motor cerrado')); }, run: (op, args, transfer) => new Promise((res, rej) => { h.last = performance.now(); const id = ++seq; pending.set(id, { resolve: res, reject: rej, op, t0: performance.now() }); w.postMessage({ id, op, args }, transfer || []); }) }; resolve(h); return; }
       if (m.fatal) { w.terminate(); return reject(new Error(m.fatal)); }
       const p = pending.get(m.id);
       if (!p) return;
@@ -27,7 +27,7 @@ function workerEngine() {
       if (m.ms != null) { perf.ops = perf.ops || []; perf.ops.unshift(`${p.op}: ${m.ms} ms en el motor · ${Math.round(performance.now() - p.t0)} ms en total`); perf.ops.length = Math.min(perf.ops.length, 20); }
       if (m.error) p.reject(new Error(m.error)); else p.resolve(m.res);
     };
-    w.onerror = (e) => { const err = new Error(e.message || 'error del motor de imagen'); if (!ready) { w.terminate(); reject(err); } else failAll(err); };
+    w.onerror = (e) => { const err = new Error(e.message || 'error del motor de imagen'); if (!ready) { w.terminate(); reject(err); } else { failAll(err); if (w.__h) w.__h.dead = true; } };
   });
 }
 
@@ -57,6 +57,31 @@ export function loadCV() {
   return engine.then(() => true);
 }
 
+// ---- varios núcleos ----
+// Cada Worker usa un núcleo. Se abren más solo si hay trabajo esperando (aplicar un filtro a todas las páginas, importar varias fotos)
+// y el teléfono tiene núcleos y memoria de sobra; los extra se cierran tras 45 s sin uso para liberar memoria.
+export function cvLanes() {
+  const cores = navigator.hardwareConcurrency || 2, mem = navigator.deviceMemory || 4;
+  let n = cores >= 6 && mem >= 4 ? 3 : cores >= 4 && mem >= 3 ? 2 : 1;
+  try { const o = +localStorage.getItem('wilscan-lanes'); if (o >= 1 && o <= 4) n = o; } catch { /* sin almacenamiento */ }
+  return n;
+}
+const extra = [];
+let spawning = false, failedSpawn = false;
+setInterval(() => {
+  for (let i = extra.length - 1; i >= 0; i--) { const w = extra[i]; if (w.dead || (w.busy() === 0 && performance.now() - w.last > 45000)) { w.stop(); extra.splice(i, 1); perf.lanes = 1 + extra.length; } }
+}, 15000);
+function pick(first) {
+  if (!first.busy) return first;                                   // motor en el hilo principal: sin grupo
+  const all = [first, ...extra].filter((w) => !w.dead);
+  const best = all.reduce((a, b) => (b.busy() < a.busy() ? b : a));
+  if (best.busy() > 0 && all.length < cvLanes() && !spawning && !failedSpawn) {
+    spawning = true;
+    workerEngine().then((w) => { extra.push(w); perf.lanes = 1 + extra.length; }).catch(() => { failedSpawn = true; }).finally(() => { spawning = false; });
+  }
+  return best;
+}
+
 // Ejecuta una operación de cv-ops.js. Las imágenes ({ data, width, height }) se transfieren sin copiar.
 let lastUse = 0;
 export const cvIdleFor = (ms) => performance.now() - lastUse > ms;
@@ -65,7 +90,7 @@ export async function cvRun(op, args) {
   lastUse = performance.now();
   await loadCV();
   const eng = await engine;
-  try { return await eng.run(op, args, args.filter((a) => a && a.data && a.data.buffer).map((a) => a.data.buffer)); }
+  try { return await pick(eng).run(op, args, args.filter((a) => a && a.data && a.data.buffer).map((a) => a.data.buffer)); }
   finally { lastUse = performance.now(); }
 }
 

@@ -1,6 +1,7 @@
 // WilScan · punto de entrada: pestañas, flujo de escaneo e importación, y registro del modo sin conexión.
-import { h, icon, $, $$, toast, withBusy, stamp, safeName } from './lib/dom.js';
+import { h, icon, $, $$, toast, withBusy, stamp, safeName, closeTopLayer, disableHistoryLayers } from './lib/dom.js';
 import { loadSettings } from './lib/settings.js';
+import { purgeOrphanPages } from './core/db.js';
 import { initLibrary, refreshDocs } from './ui/library.js';
 import { initTools } from './ui/tools.js';
 import { initSettings } from './ui/settings-view.js';
@@ -41,13 +42,15 @@ async function importFiles(files) {
   let last = null;
   try {
     if (imgs.length) last = (await withBusy('Importando imágenes…', async (b) => {
-      const items = [];
-      for (let i = 0; i < imgs.length; i++) {
-        b.update(`Imagen ${i + 1} de ${imgs.length}`, i / imgs.length);
+      let done = 0;
+      const items = imgs.map((file) => ({ draft: true, make: async () => {
         const t = timer('Importar');
-        const bmp = await createImageBitmap(imgs[i]); t.step('decodificar'); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
-        const big = scaled(c, 3000); t.step('reducir'); items.push({ canvas: big, quad: await detectQuad(big).catch(() => null), draft: true }); t.step('bordes'); t.end();
-      }
+        const bmp = await createImageBitmap(file); t.step('decodificar'); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
+        const big = scaled(c, 3000); t.step('reducir');
+        const quad = await detectQuad(big).catch(() => null); t.step('bordes'); t.end();
+        b.update(`Imagen ${++done} de ${imgs.length}`, done / imgs.length);
+        return { canvas: big, quad, draft: true };
+      } }));
       return newDoc(imgs.length === 1 ? safeName(imgs[0].name.replace(/\.[^.]+$/, '')) : 'Importado ' + stamp(), items);
     })).doc;
     for (const p of pdfs) last = await withBusy('Importando PDF…', (b) => importPdf(p, { onProgress: (f) => b.update(null, f) }));
@@ -60,7 +63,9 @@ async function importFiles(files) {
 fileIn.addEventListener('change', () => importFiles(fileIn.files));
 
 async function boot() {
+  if (isNative()) disableHistoryLayers();
   await loadSettings();
+  purgeOrphanPages().catch(() => {});   // páginas de una importación que se cortó (cierre forzado) y nunca llegaron a tener documento
   initLibrary({ onOpen: openDoc, onScan: startScan, onImport: () => fileIn.click() });
   initTools({ onOpenDoc: async (id) => { show('docs'); await openDoc(id); } });
   initSettings();
@@ -75,6 +80,9 @@ async function boot() {
   // arrastrar y soltar archivos sobre la pantalla de documentos
   window.addEventListener('dragover', (e) => { if (view === 'docs') e.preventDefault(); });
   window.addEventListener('drop', (e) => { if (view === 'docs' && e.dataTransfer && e.dataTransfer.files.length && !document.querySelector('.backdrop, .ed, .scan')) { e.preventDefault(); importFiles(e.dataTransfer.files); } });
+  // Botón «Atrás» de Android: cierra la pantalla o la hoja de encima; en Herramientas/Ajustes vuelve a Documentos; solo en Documentos sale de la app
+  const NativeApp = isNative() && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (NativeApp && NativeApp.addListener) NativeApp.addListener('backButton', () => { if (closeTopLayer()) return; if (view !== 'docs') show('docs'); else NativeApp.exitApp(); });
   window.WilScan = { show, openDoc, startScan, importFiles };
   document.documentElement.dataset.ready = '1';
   // el motor de imagen (13 MB) se prepara en segundo plano para que el primer escaneo o filtro no espere

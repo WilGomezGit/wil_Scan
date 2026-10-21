@@ -55,8 +55,11 @@ export function toast(msg, type = 'info', ms = 3600) {
 // Una sola entrada de historial mientras haya capas abiertas: «atrás» cierra la de arriba y se vuelve a armar si quedan.
 // Al cerrar por código la última capa, la entrada se retira un instante después (si se abre otra enseguida, se reutiliza).
 const layers = [];
-let armed = false, ignoreNext = false, pendingBack = 0;
-const arm = () => { if (pendingBack) { clearTimeout(pendingBack); pendingBack = 0; return; } if (!armed) { history.pushState({ wilscanLayer: 1 }, ''); armed = true; } };
+let armed = false, ignoreNext = false, pendingBack = 0, useHistory = true;
+// En la app de Android el botón «Atrás» lo gestiona la propia app (closeTopLayer): el historial del navegador ignora las entradas creadas sin un toque reciente
+export const disableHistoryLayers = () => { useHistory = false; };
+export function closeTopLayer() { const top = layers[layers.length - 1]; if (!top) return false; top.close(false); return true; }
+const arm = () => { if (!useHistory) return; if (pendingBack) { clearTimeout(pendingBack); pendingBack = 0; return; } if (!armed) { history.pushState({ wilscanLayer: 1 }, ''); armed = true; } };
 window.addEventListener('popstate', () => {
   armed = false;
   if (ignoreNext) { ignoreNext = false; return; }
@@ -70,7 +73,7 @@ export function pushLayer(close) {
     if (i < 0) return;
     layers.splice(i, 1);
     close();
-    if (!fromPop && !layers.length && armed && !pendingBack) pendingBack = setTimeout(() => { pendingBack = 0; if (!layers.length && armed) { ignoreNext = true; armed = false; history.back(); } }, 60);
+    if (useHistory && !fromPop && !layers.length && armed && !pendingBack) pendingBack = setTimeout(() => { pendingBack = 0; if (!layers.length && armed) { ignoreNext = true; armed = false; history.back(); } }, 60);
   } };
   layers.push(layer);
   arm();

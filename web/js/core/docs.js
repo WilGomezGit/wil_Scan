@@ -1,8 +1,9 @@
 // Operaciones de alto nivel sobre documentos (crear, páginas, OCR, PDF, unir, importar PDF).
-import { uid, saveDoc, getDoc, deleteDoc, savePage, getPage, getPages, deletePage } from './db.js';
+import { uid, saveDoc, getDoc, deleteDoc, savePage, getPage, getPages, deletePage, patchDoc, patchPage } from './db.js';
 import { newPage, rerender, toBlob, blobToCanvas, dropPre } from './pages.js';
 import { rotateCanvas } from './warp.js';
-import { timer, cvIdleFor } from './cv.js';
+import { timer, cvIdleFor, cvLanes } from './cv.js';
+import { limiter, mapLimit } from './pool.js';
 import { recognize } from './ocr.js';
 import { buildPdf } from './pdf-export.js';
 import { openForRender, renderPdfPage } from './pdf-tools.js';
@@ -15,19 +16,17 @@ const pageOpts = (it) => ({ quad: it.quad || null, filter: it.filter || getSetti
 // ---- Páginas en borrador ----
 // Las fotos importadas se abren con una versión a resolución de pantalla; la imagen completa se genera enseguida en segundo plano.
 // Exportar, leer el texto o unir documentos esperan a que esté lista (ensureFull). Al terminar se avisa con el evento «wilscan:page».
-let draftChain = Promise.resolve();
+const draftLane = limiter(cvLanes);          // varias páginas a la vez si el teléfono tiene núcleos de sobra
 const drafting = new Map();
 async function finishDraft(id) {
   for (let i = 0; i < 4; i++) {
     const p = await getPage(id);
     if (!p || !p.draft) return p;
     const rev = p.rev, full = await rerender({ ...p }, quality());
-    const cur = await getPage(id);
-    if (!cur) return null;
-    if (cur.rev !== rev) continue;                                  // se giró o cambió mientras tanto: se rehace con los ajustes nuevos
-    Object.assign(cur, { out: full.out, thumb: full.thumb, w: full.w, h: full.h, rev: full.rev, draft: false });
-    await savePage(cur);
-    if (cur.docId) { const d = await getDoc(cur.docId); if (d && d.pageIds[0] === id) { d.cover = cur.thumb; await saveDoc(d); } }
+    // se guarda solo si la página no cambió mientras tanto (giro, filtro…); si cambió, se rehace con los ajustes nuevos
+    const cur = await patchPage(id, (c) => { if (c.rev !== rev) return false; Object.assign(c, { out: full.out, thumb: full.thumb, w: full.w, h: full.h, rev: full.rev, draft: false }); return true; });
+    if (!cur) { if (!(await getPage(id))) return null; continue; }
+    if (cur.docId) await patchDoc(cur.docId, (d) => { if (d.pageIds[0] !== id) return false; d.cover = cur.thumb; return true; });
     window.dispatchEvent(new CustomEvent('wilscan:page', { detail: { id } }));
     ocrLater([cur]);
     return cur;
@@ -37,7 +36,7 @@ async function finishDraft(id) {
 export function finishLater(pages) {
   for (const p of pages) {
     if (!p || !p.draft || drafting.has(p.id)) continue;
-    const job = (draftChain = draftChain.then(() => finishDraft(p.id)).catch(() => null).finally(() => drafting.delete(p.id)));
+    const job = draftLane(() => finishDraft(p.id)).catch(() => null).finally(() => drafting.delete(p.id));
     drafting.set(p.id, job);
   }
 }
@@ -95,19 +94,15 @@ export async function recropPage(page, quad) {
 async function pageFor(docId, it) {
   let p = null;
   if (it.page) { try { p = await it.page; } catch { p = null; } }
-  if (!p) p = await newPage(docId, it.canvas, pageOpts(it));
+  if (!p) { const src = it.make ? await it.make() : it; p = await newPage(docId, src.canvas, pageOpts(src)); }   // make(): la foto se decodifica justo antes de procesarla y se libera enseguida
   p.docId = docId;
   return p;
 }
 
 export async function newDoc(title, items, { onProgress } = {}) {
-  const id = uid(), pages = [];
-  for (let i = 0; i < items.length; i++) {
-    const it = items[i];
-    const p = await pageFor(id, it);
-    await savePage(p); pages.push(p);
-    if (onProgress) onProgress((i + 1) / items.length);
-  }
+  const id = uid();
+  let done = 0;
+  const pages = await mapLimit(items, cvLanes(), async (it) => { const p = await pageFor(id, it); await savePage(p); if (onProgress) onProgress(++done / items.length); return p; });
   const doc = { id, title, created: Date.now(), pageIds: pages.map((p) => p.id), pageCount: pages.length, cover: pages[0] ? pages[0].thumb : null };
   await saveDoc(doc);
   ocrLater(pages.filter((p) => !p.draft)); finishLater(pages);
@@ -123,8 +118,8 @@ export async function persistDoc(doc, pages) {
 
 export async function appendPages(doc, items) {
   const pages = await docPages(doc);
-  const added = [];
-  for (const it of items) { const p = await pageFor(doc.id, it); await savePage(p); pages.push(p); added.push(p); }
+  const added = await mapLimit(items, cvLanes(), async (it) => { const p = await pageFor(doc.id, it); await savePage(p); return p; });
+  pages.push(...added);
   await persistDoc(doc, pages);
   ocrLater(added.filter((p) => !p.draft)); finishLater(added);
   return pages;
@@ -162,7 +157,7 @@ export async function rotatePage(page) {
 
 export async function updateAllPages(doc, patch) {
   const pages = await docPages(doc);
-  for (const p of pages) await updatePage(p, patch);
+  await mapLimit(pages, cvLanes(), (p) => updatePage(p, patch));   // en paralelo si hay núcleos de sobra
   await persistDoc(doc, pages);
   return pages;
 }
