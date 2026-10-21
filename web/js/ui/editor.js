@@ -1,7 +1,7 @@
 // Editor de documento: ver páginas, recortar, filtros, girar, texto, ordenar, añadir y eliminar páginas, exportar.
 import { h, icon, toast, confirmBox, promptBox, menuSheet, openSheet, withBusy, pushLayer, safeName } from '../lib/dom.js';
 import { getDoc, saveDoc, deleteDoc } from '../core/db.js';
-import { docPages, appendPages, removePage, updatePage, updateAllPages, reorderPages } from '../core/docs.js';
+import { docPages, appendPages, removePage, updatePage, updateAllPages, reorderPages, rotatePage } from '../core/docs.js';
 import { blobToCanvas, scaled } from '../core/pages.js';
 import { warpQuad, rotateCanvas } from '../core/warp.js';
 import { applyFilter, FILTERS } from '../core/filters.js';
@@ -70,23 +70,40 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   }
   // Carrusel de filtros: toca uno para aplicarlo a la página (o a todas), con vista previa de cada filtro sobre la página actual
   let filterAll = false, fbarTick = 0;
-  const tinyCache = new Map();
-  async function tinyOf(p) {
-    if (!tinyCache.has(p.id)) {
-      const bmp = await createImageBitmap(p.orig, { resizeWidth: 700 });
+  const midCache = new Map();
+  const dropSmall = (id) => { midCache.delete(id); };
+  // versión reducida (≈900 px) de la página sin filtro: sirve para las vistas previas y para responder al instante al tocar un filtro. Se decodifica una sola vez.
+  const midOf = async (p) => {
+    if (!midCache.has(p.id)) {
+      const bmp = await createImageBitmap(p.orig, { resizeWidth: 1100 });
       const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
-      tinyCache.set(p.id, rotateCanvas(await warpQuad(c, p.quad || null, { maxSide: 160 }), p.rot || 0));
+      midCache.set(p.id, rotateCanvas(await warpQuad(c, p.quad || null, { maxSide: 900 }), p.rot || 0));
     }
-    return tinyCache.get(p.id);
-  }
+    return midCache.get(p.id);
+  };
+  const tinyOf = async (p) => scaled(await midOf(p), 160);
+  // las operaciones pesadas se hacen de una en una y sin bloquear la pantalla
+  let work = Promise.resolve(), pendingN = 0;
+  const enqueue = (fn) => { pendingN++; return (work = work.then(fn).catch((e) => toast(e.message || 'No se pudo completar', 'error')).finally(() => { pendingN--; })); };
   async function applyFilterTo(id) {
-    const p = cur(); if ((p.filter || 'auto') === id && !filterAll) return;
-    const all = filterAll && pages.length > 1;
-    await withBusy(all ? 'Aplicando a todas las páginas…' : 'Aplicando filtro…', async () => {
-      if (all) pages = await updateAllPages(doc, { filter: id }); else await updatePage(p, { filter: id });
-    });
-    for (const q of pages) q.updatedKey = Date.now() + Math.random();
-    doc = await getDoc(doc.id); await commit(); refresh();
+    const p = cur(), all = filterAll && pages.length > 1;
+    if ((p.filter || 'auto') === id && !all) return;
+    if (all) {
+      await withBusy('Aplicando a todas las páginas…', async () => { pages = await updateAllPages(doc, { filter: id }); });
+      for (const q of pages) q.updatedKey = Date.now() + Math.random();
+      doc = await getDoc(doc.id); await commit(); refresh(); return;
+    }
+    // una página: se ve el resultado al instante (versión reducida) y la imagen completa se genera detrás, sin bloquear
+    fbar.querySelectorAll('.flt').forEach((b, i) => { const on = FILTERS[i].id === id; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+    midOf(p).then((mid) => applyFilter(mid, { filter: id, bright: p.bright || 0, contrast: p.contrast || 0 })).then((r) => {
+      if (closed || cur() !== p) return;
+      live.width = r.width; live.height = r.height; live.getContext('2d').drawImage(r, 0, 0); live.hidden = false;
+    }).catch(() => {});
+    stage.classList.add('working');
+    enqueue(async () => {
+      await updatePage(p, { filter: id }); p.updatedKey = Date.now();
+      doc = await getDoc(doc.id); if (pages[0] === p) await commit();
+    }).then(() => { if (!pendingN) { stage.classList.remove('working'); if (!closed) refresh(); } });
   }
   function drawFilterBar() {
     const p = cur(), my = ++fbarTick, now = p.filter || 'auto';
@@ -127,12 +144,12 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     const p = cur();
     const q = await openCropper(p);
     if (q === undefined) return;
-    await withBusy('Recortando…', () => updatePage(p, { quad: q, skew: q ? 0 : p.skew })); tinyCache.delete(p.id);
+    await enqueue(() => withBusy('Recortando…', () => updatePage(p, { quad: q, skew: q ? 0 : p.skew }))); dropSmall(p.id);
     p.updatedKey = Date.now(); if (idx === 0) await commit(); refresh();
   }
   async function doRotate() {
     const p = cur();
-    await withBusy('Girando…', () => updatePage(p, { rot: ((p.rot || 0) + 90) % 360 })); tinyCache.delete(p.id);
+    await enqueue(() => withBusy('Girando…', () => rotatePage(p))); dropSmall(p.id);
     p.updatedKey = Date.now(); if (idx === 0) await commit(); refresh();
   }
   async function doDeletePage() {

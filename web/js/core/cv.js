@@ -2,6 +2,13 @@
 // Si el Worker no puede arrancar, se carga en el hilo principal como antes (más lento, pero funciona).
 let engine = null;
 
+// Diagnóstico de velocidad (se muestra en Ajustes): qué motor se está usando y cuánto tarda cada paso
+export const perf = { engine: 'sin cargar', log: [] };
+export function timer(label) {
+  const t0 = performance.now(), steps = [];
+  return { step(name) { steps.push(name + ' ' + Math.round(performance.now() - t0)); }, end() { perf.log.unshift(`${label}: ${Math.round(performance.now() - t0)} ms (${steps.join(' · ')})`); perf.log.length = Math.min(perf.log.length, 12); } };
+}
+
 function workerEngine() {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') return reject(new Error('sin Worker'));
@@ -11,7 +18,7 @@ function workerEngine() {
     const failAll = (err) => { for (const p of pending.values()) p.reject(err); pending.clear(); };
     w.onmessage = (e) => {
       const m = e.data;
-      if (m.ready) { ready = true; resolve({ run: (op, args, transfer) => new Promise((res, rej) => { const id = ++seq; pending.set(id, { resolve: res, reject: rej }); w.postMessage({ id, op, args }, transfer || []); }) }); return; }
+      if (m.ready) { ready = true; perf.engine = 'Worker (segundo plano)'; resolve({ run: (op, args, transfer) => new Promise((res, rej) => { const id = ++seq; pending.set(id, { resolve: res, reject: rej }); w.postMessage({ id, op, args }, transfer || []); }) }); return; }
       if (m.fatal) { w.terminate(); return reject(new Error(m.fatal)); }
       const p = pending.get(m.id);
       if (!p) return;
@@ -33,6 +40,7 @@ function localEngine() {
         if (m && typeof m.then === 'function') m = await m;                      // la versión 5 entrega una promesa
         if (!m.Mat) await new Promise((r) => { m.onRuntimeInitialized = r; });   // versiones anteriores
         const ops = await import('./cv-ops.js');
+        perf.engine = 'Hilo principal (el Worker no arrancó)';
         resolve({ run: async (op, args) => ops[op](m, ...args) });
       } catch (e) { reject(e); }
     };

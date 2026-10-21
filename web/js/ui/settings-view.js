@@ -5,6 +5,7 @@ import { FILTERS } from '../core/filters.js';
 import { LANGS } from '../core/ocr.js';
 import { usage, wipeAll, persist } from '../core/db.js';
 import { isNative } from '../core/share.js';
+import { perf, loadCV } from '../core/cv.js';
 
 export const APP_VERSION = '1.0.0';
 let installEvent = null;
@@ -27,6 +28,9 @@ export function initSettings() {
   const root = $('#v-settings');
   const storage = h('p', { class: 'hint', text: 'Calculando…' });
   const swState = h('p', { class: 'hint', text: '' });
+  const diag = h('div', { class: 'hint' });
+  const drawDiag = () => { diag.textContent = ''; diag.append(h('p', { class: 'tight', text: 'Motor de imagen: ' + perf.engine }), ...(perf.log.length ? perf.log.map((l) => h('p', { class: 'tight', text: l })) : [h('p', { class: 'tight', text: 'Aún no hay medidas: gira o filtra una página y pulsa Actualizar.' })])); };
+  drawDiag(); document.addEventListener('click', (e) => { if (e.target.closest('[data-tab="settings"]')) setTimeout(drawDiag, 50); });
   root.append(
     h('div', { class: 'view-head' }, h('h1', { text: 'Ajustes' })),
     h('div', { class: 'set-cols' },
@@ -43,6 +47,8 @@ export function initSettings() {
           h('button', { id: 'btnInstall', class: 'btn primary block', attrs: { type: 'button' }, hidden: true, on: { click: async () => { if (installEvent) { installEvent.prompt(); await installEvent.userChoice.catch(() => {}); installEvent = null; $('#btnInstall').hidden = true; } } } }, icon('download', 's'), 'Instalar WilScan en este dispositivo'),
           swState, h('div', { class: 'label', text: 'Almacenamiento' }), storage,
           h('div', { class: 'btn-row set-actions' }, h('button', { class: 'btn danger', attrs: { type: 'button' }, on: { click: async () => { if (await confirmBox({ title: '¿Borrar todos los datos?', text: 'Se eliminarán todos los documentos, la firma y los ajustes de este dispositivo. No se puede deshacer.', ok: 'Borrar todo', danger: true })) { await wipeAll(); toast('Datos borrados', 'ok'); setTimeout(() => location.reload(), 700); } } } }, icon('trash', 's'), 'Borrar todos los datos'))),
+        h('div', { class: 'section-title', text: 'Diagnóstico de velocidad' }),
+        h('div', { class: 'card pad' }, diag, h('div', { class: 'btn-row' }, h('button', { class: 'btn small', attrs: { type: 'button' }, on: { click: () => { loadCV().catch(() => {}).then(drawDiag); } } }, 'Actualizar'))),
         h('div', { class: 'section-title', text: 'Acerca de' }),
         h('div', { class: 'card pad about' },
           h('div', { class: 'about-head' }, h('img', { src: new URL('../../assets/logo.svg', import.meta.url).href, alt: 'WG', width: 44, height: 44 }), h('div', {}, h('b', { text: 'WilScan' }), h('small', { text: ` versión ${APP_VERSION}` }), h('p', { class: 'hint tight', text: 'Una creación de WG — Wilmar Gómez' }))),

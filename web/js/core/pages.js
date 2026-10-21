@@ -1,7 +1,7 @@
 // Páginas: guardan la foto original y los ajustes (esquinas, filtro, giro…); la imagen final se vuelve a generar al cambiar algo.
 // Así nada es destructivo: siempre se puede volver a recortar o cambiar de filtro con la foto original.
 import { uid } from './db.js';
-import { canvasOf } from './cv.js';
+import { canvasOf, timer } from './cv.js';
 import { warpQuad, rotateCanvas, rotateBy } from './warp.js';
 import { estimateSkew } from './deskew.js';
 import { applyFilter } from './filters.js';
@@ -40,16 +40,30 @@ export async function measureSkew(page) {
   return estimateSkew(c);
 }
 
-// Genera la imagen final y la miniatura de una página a partir de su original y sus ajustes.
-export async function renderPage(page, { quality = 0.9 } = {}) {
-  const src = await blobToCanvas(page.orig);
-  let c = await warpQuad(src, page.quad || null);
+// La página ya recortada, enderezada y girada (antes del filtro) se guarda en memoria: cambiar de filtro o de brillo no repite la decodificación ni el recorte.
+const pre = new Map();
+export const dropPre = (id) => pre.delete(id);
+async function prepared(page, t) {
+  const key = JSON.stringify([page.quad || null, page.skew || 0, page.rot || 0]), hit = pre.get(page.id);
+  if (hit && hit.key === key) { t.step('recorte (en memoria)'); return hit.canvas; }
+  const src = await blobToCanvas(page.orig); t.step('decodificar');
+  let c = await warpQuad(src, page.quad || null); t.step('recorte');
   if (page.skew) c = rotateBy(c, -page.skew);                         // enderezado por la inclinación del texto
   c = rotateCanvas(c, page.rot || 0);
   c = enlarge(c);                                                     // las fotos pequeñas se amplían para que el texto salga nítido
-  c = await applyFilter(c, { filter: page.filter || 'auto', bright: page.bright || 0, contrast: page.contrast || 0 });
+  pre.delete(page.id); pre.set(page.id, { key, canvas: c });
+  while (pre.size > 2) pre.delete(pre.keys().next().value);
+  return c;
+}
+
+// Genera la imagen final y la miniatura de una página a partir de su original y sus ajustes.
+export async function renderPage(page, { quality = 0.9 } = {}) {
+  const t = timer('Página');
+  const base = await prepared(page, t);
+  const c = await applyFilter(base, { filter: page.filter || 'auto', bright: page.bright || 0, contrast: page.contrast || 0 }); t.step('filtro');
   const thumb = await toBlob(scaled(c, 420), 'image/jpeg', 0.75);
-  return { out: await toBlob(c, 'image/jpeg', quality), thumb, w: c.width, h: c.height };
+  const out = await toBlob(c, 'image/jpeg', quality); t.step('guardar JPG'); t.end();
+  return { out, thumb, w: c.width, h: c.height };
 }
 
 // Crea una página nueva desde un lienzo (foto de la cámara o imagen importada)

@@ -1,6 +1,8 @@
 // Operaciones de alto nivel sobre documentos (crear, páginas, OCR, PDF, unir, importar PDF).
 import { uid, saveDoc, getDoc, deleteDoc, savePage, getPages, deletePage } from './db.js';
-import { newPage, rerender, toBlob, blobToCanvas } from './pages.js';
+import { newPage, rerender, toBlob, blobToCanvas, dropPre } from './pages.js';
+import { rotateCanvas } from './warp.js';
+import { timer } from './cv.js';
 import { recognize } from './ocr.js';
 import { buildPdf } from './pdf-export.js';
 import { openForRender, renderPdfPage } from './pdf-tools.js';
@@ -67,6 +69,16 @@ export async function updatePage(page, patch) {
   await rerender(page, quality());
   page.text = null; page.textLang = null; page.words = null;   // cambió la imagen: el texto reconocido ya no vale
   await savePage(page);
+  return page;
+}
+
+// Girar 90° sin repetir todo el proceso: se gira la imagen ya generada y su miniatura (de décimas de segundo, no de segundos)
+export async function rotatePage(page) {
+  const t = timer('Girar');
+  const out = rotateCanvas(await blobToCanvas(page.out), 90), thumb = rotateCanvas(await blobToCanvas(page.thumb), 90); t.step('girar');
+  Object.assign(page, { rot: ((page.rot || 0) + 90) % 360, out: await toBlob(out, 'image/jpeg', Math.max(quality(), 0.92)), thumb: await toBlob(thumb, 'image/jpeg', 0.75), w: out.width, h: out.height, text: null, textLang: null, words: null });
+  dropPre(page.id);
+  await savePage(page); t.step('guardar'); t.end();
   return page;
 }
 
