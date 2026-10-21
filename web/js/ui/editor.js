@@ -65,7 +65,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   }
   function drawTools() {
     tools.textContent = '';
-    const defs = [['crop', 'Recortar', doCrop], ['filter', 'Filtros', () => doFilters(false)], ['rotate', 'Girar', doRotate], ['text', 'Texto', () => openText(doc, pages, idx)], ['layers', 'Ordenar', doOrder], ['trash', 'Eliminar', doDeletePage]];
+    const defs = [['crop', 'Recortar', doCrop], ['filter', 'Filtros', after(() => doFilters(false))], ['rotate', 'Girar', doRotate], ['text', 'Texto', after(() => openText(doc, pages, idx))], ['layers', 'Ordenar', after(doOrder)], ['trash', 'Eliminar', after(doDeletePage)]];
     for (const [ic, label, fn] of defs) tools.append(h('button', { class: 'ed-tool', attrs: { type: 'button' }, on: { click: fn } }, icon(ic), h('span', { text: label })));
   }
   // Carrusel de filtros: toca uno para aplicarlo a la página (o a todas), con vista previa de cada filtro sobre la página actual
@@ -73,14 +73,22 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   const midCache = new Map();
   const dropSmall = (id) => { midCache.delete(id); };
   // versión reducida (≈900 px) de la página sin filtro: sirve para las vistas previas y para responder al instante al tocar un filtro. Se decodifica una sola vez.
-  const midOf = async (p) => {
-    if (!midCache.has(p.id)) {
-      const bmp = await createImageBitmap(p.orig, { resizeWidth: 1100 });
-      const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
-      midCache.set(p.id, rotateCanvas(await warpQuad(c, p.quad || null, { maxSide: 900 }), p.rot || 0));
-    }
-    return midCache.get(p.id);
+  const smallBase = async (p) => {
+    const bmp = await createImageBitmap(p.orig, { resizeWidth: 1100 });
+    const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
+    return rotateCanvas(await warpQuad(c, p.quad || null, { maxSide: 900 }), p.rot || 0);
   };
+  const midOf = async (p) => { if (!midCache.has(p.id)) midCache.set(p.id, await smallBase(p)); return midCache.get(p.id); };
+  const showLive = (p, r) => { if (!r || closed || cur() !== p) return; live.width = r.width; live.height = r.height; live.getContext('2d').drawImage(r, 0, 0); live.hidden = false; };
+  // Muestra el resultado al instante (vista previa) y genera la imagen completa detrás; al terminar todo, se refresca la página
+  function inBackground(p, preview, job) {
+    if (preview) Promise.resolve(preview).then((r) => showLive(p, r)).catch(() => {});
+    stage.classList.add('working');
+    return enqueue(async () => { await job(); p.updatedKey = Date.now(); doc = await getDoc(doc.id); if (pages[0] === p) await commit(); })
+      .then(() => { if (!pendingN) { stage.classList.remove('working'); if (!closed) refresh(); } });
+  }
+  // antes de exportar, leer el texto, ordenar o borrar, se termina lo que esté pendiente (para no usar una imagen vieja)
+  const after = (fn) => async (...a) => { if (pendingN) await withBusy('Terminando los cambios…', () => work); return fn(...a); };
   const tinyOf = async (p) => scaled(await midOf(p), 160);
   // las operaciones pesadas se hacen de una en una y sin bloquear la pantalla
   let work = Promise.resolve(), pendingN = 0;
@@ -89,21 +97,13 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     const p = cur(), all = filterAll && pages.length > 1;
     if ((p.filter || 'auto') === id && !all) return;
     if (all) {
-      await withBusy('Aplicando a todas las páginas…', async () => { pages = await updateAllPages(doc, { filter: id }); });
+      await withBusy('Aplicando a todas las páginas…', async () => { await work; pages = await updateAllPages(doc, { filter: id }); });
       for (const q of pages) q.updatedKey = Date.now() + Math.random();
       doc = await getDoc(doc.id); await commit(); refresh(); return;
     }
     // una página: se ve el resultado al instante (versión reducida) y la imagen completa se genera detrás, sin bloquear
     fbar.querySelectorAll('.flt').forEach((b, i) => { const on = FILTERS[i].id === id; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
-    midOf(p).then((mid) => applyFilter(mid, { filter: id, bright: p.bright || 0, contrast: p.contrast || 0 })).then((r) => {
-      if (closed || cur() !== p) return;
-      live.width = r.width; live.height = r.height; live.getContext('2d').drawImage(r, 0, 0); live.hidden = false;
-    }).catch(() => {});
-    stage.classList.add('working');
-    enqueue(async () => {
-      await updatePage(p, { filter: id }); p.updatedKey = Date.now();
-      doc = await getDoc(doc.id); if (pages[0] === p) await commit();
-    }).then(() => { if (!pendingN) { stage.classList.remove('working'); if (!closed) refresh(); } });
+    inBackground(p, midOf(p).then((mid) => applyFilter(mid, { filter: id, bright: p.bright || 0, contrast: p.contrast || 0 })), () => updatePage(p, { filter: id }));
   }
   function drawFilterBar() {
     const p = cur(), my = ++fbarTick, now = p.filter || 'auto';
@@ -142,15 +142,19 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   const commit = async () => { await (async () => { const d = await getDoc(doc.id); if (d) { d.cover = pages[0].thumb; await saveDoc(d); doc = d; } })(); };
   async function doCrop() {
     const p = cur();
+    if (pendingN) await withBusy('Terminando los cambios…', () => work);
     const q = await openCropper(p);
     if (q === undefined) return;
-    await enqueue(() => withBusy('Recortando…', () => updatePage(p, { quad: q, skew: q ? 0 : p.skew }))); dropSmall(p.id);
-    p.updatedKey = Date.now(); if (idx === 0) await commit(); refresh();
+    dropSmall(p.id);
+    const patch = { quad: q, skew: q ? 0 : p.skew };
+    inBackground(p, smallBase({ ...p, ...patch }).then((b) => applyFilter(b, { filter: p.filter || 'auto', bright: p.bright || 0, contrast: p.contrast || 0 })), () => updatePage(p, patch));
   }
   async function doRotate() {
-    const p = cur();
-    await enqueue(() => withBusy('Girando…', () => rotatePage(p))); dropSmall(p.id);
-    p.updatedKey = Date.now(); if (idx === 0) await commit(); refresh();
+    const p = cur(), shown = !live.hidden ? live : img;
+    let preview = null;                                    // lo que ya se ve en pantalla, girado (instantáneo)
+    if (shown.naturalWidth || shown.width) { const k = Math.min(1, 900 / Math.max(shown.naturalWidth || shown.width, shown.naturalHeight || shown.height)); const c = canvasOf((shown.naturalWidth || shown.width) * k, (shown.naturalHeight || shown.height) * k); c.getContext('2d').drawImage(shown, 0, 0, c.width, c.height); preview = rotateCanvas(c, 90); }
+    dropSmall(p.id);
+    inBackground(p, preview, () => rotatePage(p));
   }
   async function doDeletePage() {
     const p = cur();
@@ -243,12 +247,12 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
 
   titleBtn.addEventListener('click', rename);
   async function rename() { const t = await promptBox({ title: 'Cambiar nombre', value: doc.title, label: 'Nombre del documento' }); if (!t) return; doc.title = safeName(t); await saveDoc(doc); drawStage(); }
-  exportBtn.addEventListener('click', () => openExport(doc, { pages }));
+  exportBtn.addEventListener('click', after(() => openExport(doc, { pages })));
   moreBtn.addEventListener('click', () => menuSheet(doc.title, [
-    { icon: 'share', label: 'Exportar o compartir', run: () => openExport(doc, { pages }) },
-    { icon: 'download', label: 'Guardar como PDF', run: () => openExport(doc, { pages, mode: 'save' }) },
+    { icon: 'share', label: 'Exportar o compartir', run: after(() => openExport(doc, { pages })) },
+    { icon: 'download', label: 'Guardar como PDF', run: after(() => openExport(doc, { pages, mode: 'save' })) },
     { icon: 'edit', label: 'Cambiar nombre', run: rename },
-    { icon: 'filter', label: 'Aplicar un filtro a todas las páginas', run: () => doFilters(true) },
+    { icon: 'filter', label: 'Aplicar un filtro a todas las páginas', run: after(() => doFilters(true)) },
     { icon: 'trash', label: 'Eliminar documento', danger: true, run: async () => { if (await confirmBox({ title: '¿Eliminar el documento?', text: `«${doc.title}» se borrará de este dispositivo.`, ok: 'Eliminar', danger: true })) { await deleteDoc(doc.id); toast('Documento eliminado', 'ok'); pop(); } } },
   ]));
 

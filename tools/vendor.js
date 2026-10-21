@@ -11,8 +11,9 @@ copy('@techstark/opencv-js/dist/opencv.js', 'opencv/opencv.js');
 // pdf-lib (MIT): crear y editar PDF
 copy('pdf-lib/dist/pdf-lib.min.js', 'pdf-lib/pdf-lib.min.js');
 // pdf.js (Apache-2.0): leer y dibujar PDF
-copy('pdfjs-dist/build/pdf.min.mjs', 'pdfjs/pdf.min.js');
-copy('pdfjs-dist/build/pdf.worker.min.mjs', 'pdfjs/pdf.worker.min.js');
+// versión «legacy»: la moderna usa funciones de JavaScript que aún no tienen muchos WebView de Android (p. ej. Map.getOrInsertComputed)
+copy('pdfjs-dist/legacy/build/pdf.min.mjs', 'pdfjs/pdf.min.js');
+copy('pdfjs-dist/legacy/build/pdf.worker.min.mjs', 'pdfjs/pdf.worker.min.js');
 // Tesseract.js (Apache-2.0): OCR sin conexión (núcleo con wasm incrustado: tres variantes según la CPU)
 copy('tesseract.js/dist/tesseract.min.js', 'tesseract/tesseract.min.js');
 copy('tesseract.js/dist/worker.min.js', 'tesseract/worker.min.js');

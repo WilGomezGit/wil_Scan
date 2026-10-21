@@ -42,8 +42,8 @@ async function getWorker(lang) {
   return worker;
 }
 
-// Reduce lienzos enormes (el OCR no gana nada por encima de ~3000 px y tarda mucho más)
-function prepare(canvas, maxSide = 3000) {
+// Reduce los lienzos grandes: a 1800 px lee igual de bien una página normal (probado con letra pequeña) y tarda bastante menos
+function prepare(canvas, maxSide = 1800) {
   const k = Math.min(1, maxSide / Math.max(canvas.width, canvas.height));
   if (k === 1) return canvas;
   const c = canvasOf(canvas.width * k, canvas.height * k); c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height); return c;

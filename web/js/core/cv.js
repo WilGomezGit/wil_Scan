@@ -56,10 +56,15 @@ export function loadCV() {
 }
 
 // Ejecuta una operación de cv-ops.js. Las imágenes ({ data, width, height }) se transfieren sin copiar.
+let lastUse = 0;
+export const cvIdleFor = (ms) => performance.now() - lastUse > ms;
+
 export async function cvRun(op, args) {
+  lastUse = performance.now();
   await loadCV();
   const eng = await engine;
-  return eng.run(op, args, args.filter((a) => a && a.data && a.data.buffer).map((a) => a.data.buffer));
+  try { return await eng.run(op, args, args.filter((a) => a && a.data && a.data.buffer).map((a) => a.data.buffer)); }
+  finally { lastUse = performance.now(); }
 }
 
 export const imageOf = (canvas) => canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
