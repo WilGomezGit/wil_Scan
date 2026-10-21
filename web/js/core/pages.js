@@ -62,6 +62,21 @@ async function prepared(page, t, srcCanvas = null, side = 0) {
   return c;
 }
 
+// Zonas ocultas: marks = [{ x, y, w, h, t }] en fracciones de la imagen final; t = 'pix' (pixelar), 'blk' (tapar en negro), 'wht' (borrar en blanco)
+export function applyMarks(c, marks) {
+  const x = c.getContext('2d');
+  for (const m of marks) {
+    const px = Math.max(0, Math.round(m.x * c.width)), py = Math.max(0, Math.round(m.y * c.height));
+    const pw = Math.min(c.width - px, Math.max(1, Math.round(m.w * c.width))), ph = Math.min(c.height - py, Math.max(1, Math.round(m.h * c.height)));
+    if (m.t === 'blk' || m.t === 'wht') { x.fillStyle = m.t === 'blk' ? '#000' : '#fff'; x.fillRect(px, py, pw, ph); continue; }
+    const cell = Math.max(10, Math.round(Math.max(pw, ph) / 8)), tw = Math.max(1, Math.round(pw / cell)), th = Math.max(1, Math.round(ph / cell));
+    const t = canvasOf(tw, th), tx = t.getContext('2d');
+    tx.imageSmoothingEnabled = true; tx.drawImage(c, px, py, pw, ph, 0, 0, tw, th);
+    x.imageSmoothingEnabled = false; x.drawImage(t, 0, 0, tw, th, px, py, pw, ph); x.imageSmoothingEnabled = true;
+  }
+  return c;
+}
+
 // Genera la imagen final y la miniatura de una página a partir de su original y sus ajustes.
 export async function renderPage(page, { quality = 0.9, src = null, draft = false } = {}) {
   const t = timer(draft ? 'Página (borrador)' : 'Página');
@@ -70,6 +85,7 @@ export async function renderPage(page, { quality = 0.9, src = null, draft = fals
   // Blanco y negro es la excepción: el umbral se calcula ya ampliado para que los trazos finos (la «l», la «t») no se pierdan.
   const bn = (page.filter || 'auto') === 'bn' && !draft;
   const f = await applyFilter(bn ? enlarge(base) : base, { filter: page.filter || 'auto', bright: page.bright || 0, contrast: page.contrast || 0 }), c = draft || bn ? f : enlarge(f); t.step('filtro');
+  if (page.marks && page.marks.length) applyMarks(c, page.marks);
   const thumb = await toBlob(scaled(c, 420), 'image/jpeg', 0.75);
   const out = await toBlob(c, 'image/jpeg', quality); t.step('guardar JPG'); t.end();
   return { out, thumb, w: c.width, h: c.height, draft, rev: Date.now() + Math.random() };   // rev: versión de la imagen (para saber si un OCR hecho en segundo plano sigue valiendo)

@@ -45,7 +45,7 @@ G.arranque = async () => {
   check('la app arranca sin errores de consola', c.logs.filter((l) => !/favicon|^NAV /.test(l)).length === 0, c.logs.join(' | ').slice(0, 300));
   check('muestra el estado vacío con «Escanear» e «Importar»', (await text('.empty h2')) === 'Aún no hay documentos' && (await count('.empty .btn')) === 2);
   await c.ev(`WilScan.show('tools'); true`);
-  check('Herramientas: 15 herramientas en 3 grupos', (await count('.tool')) === 15 && (await count('#v-tools .section-title')) === 3, String(await count('.tool')));
+  check('Herramientas: 16 herramientas en 3 grupos', (await count('.tool')) === 16 && (await count('#v-tools .section-title')) === 3, String(await count('.tool')));
   await c.ev(`WilScan.show('settings'); true`);
   check('Ajustes: muestra versión y la marca WG', /versión 1\.0\.0/.test(await text('.about')) && /WG — Wilmar Gómez/.test(await text('.about')));
   await c.ev(`WilScan.show('docs'); true`);
@@ -95,7 +95,7 @@ G.editor = async () => {
 
   // filtros: blanco y negro en todas las páginas
   await clickText('.ed-tool', 'Filtros');
-  check('se abre la hoja de filtros con 6 filtros', !!(await wf(() => c.ev(`document.querySelectorAll('.flt').length===6`), 8000)));
+  check('se abre la hoja de filtros con 9 filtros', !!(await wf(() => c.ev(`document.querySelectorAll('.flt').length===9`), 8000)));
   await clickText('.flt', 'Blanco y negro');
   const livePrev = await wf(() => c.ev(`!document.querySelector('.ed-live').hidden`), 8000);
   check('la vista previa en vivo se muestra al elegir filtro', !!livePrev);
@@ -376,12 +376,13 @@ G.firma = async () => {
   await shot('10-firma-pad'); await audit('pad de firma (móvil)');
   await clickText('.sheet-foot .btn', 'Usar esta firma');
   check('la firma aparece sobre la página', !!(await wf(() => exists('.sign-sig'), 8000)));
+  await sleep(400); await audit('firmar PDF (móvil)');   // antes de desplazar la hoja: con el contenido desplazado bajo la cabecera fija el auditor ve falsos solapes
   await sleep(600); await c.ev(`document.querySelector('.sign-sig').scrollIntoView({block:'center'}); true`); await sleep(300);
   const s0 = await rectOf('.sign-sig');
   await drag([s0.cx, s0.cy], [s0.cx - 60, s0.cy - 70], 10);
   const s1 = await rectOf('.sign-sig');
   check('la firma se arrastra a otro sitio', Math.hypot(s1.x - s0.x + 60, s1.y - s0.y + 70) < 6, `${Math.round(s1.x - s0.x)},${Math.round(s1.y - s0.y)}`);
-  await shot('11-firma-colocada'); await audit('firmar PDF (móvil)');
+  await shot('11-firma-colocada');
   const before2 = downloads();
   await clickText('.sheet-foot .btn', 'Firmar y guardar');
   await wf(() => c.ev(`document.querySelector('.sheet-head h2') && document.querySelector('.sheet-head h2').textContent==='Resultado'`), 30000);
@@ -405,6 +406,98 @@ G.torcida = async () => {
   const ok = await wf(() => c.ev(`/CONTRATO DE ARRENDAMIENTO/i.test((document.querySelector('.sheet textarea')||{}).value||'')`), 60000, 500);
   check('el texto de la foto enderezada se reconoce bien', !!ok, (await c.ev(`(document.querySelector('.sheet textarea')||{}).value||''`)).split(String.fromCharCode(10))[0]);
   await closeSheets(); await click('.ed-top .icon-btn'); await sleep(400);
+};
+
+// Ocultar datos privados: dibujar zonas, que giren con la página y que se puedan quitar
+G.ocultar = async () => {
+  await c.ev(`WilScan.show('docs'); true`); await sleep(300);
+  const privado = path.join(DL, 'privado-prueba.png'); fs.copyFileSync(path.join(FX, 'factura-recta.png'), privado);   // nombre propio: otros grupos ya importaron «factura-recta»
+  await c.setFiles('input[type=file][aria-label="Importar archivos"]', [privado]);
+  check('importar la factura abre el editor', !!(await wf(() => exists('.ed'), 40000)));
+  await wf(() => c.ev(`(document.querySelector('.ed-img')||{}).naturalWidth>300 && !document.querySelector('.ed-stage.working')`), 30000);
+  const myPage = async () => { const d = (await dbDocs()).find((x) => /privado-prueba/.test(x.title)); return d ? (await c.ev(`new Promise((res)=>{const r=indexedDB.open('wilscan'); r.onsuccess=()=>{const g=r.result.transaction('pages').objectStore('pages').get(${j(d.pageIds[0])}); g.onsuccess=()=>res({marks:g.result.marks||[], rot:g.result.rot, draft:!!g.result.draft})}})`)) : null; };
+  // color del centro de una zona de la imagen mostrada (fracciones de la imagen)
+  const px = (fx, fy) => c.ev(`(async()=>{const i=document.querySelector('.ed-img'); await i.decode(); const k=document.createElement('canvas'); k.width=i.naturalWidth; k.height=i.naturalHeight; const x=k.getContext('2d'); x.drawImage(i,0,0); const d=x.getImageData(Math.round(${fx}*k.width), Math.round(${fy}*k.height), 1, 1).data; return [d[0],d[1],d[2]]})()`);
+  await clickText('.ed-tool', 'Ocultar');
+  check('«Ocultar» abre la pantalla con 3 tipos', !!(await wf(() => exists('.crop .red-types'), 5000)) && (await count('.red-types .btn')) === 3);
+  await wf(() => c.ev(`!!(document.querySelector('.crop-img')||{}).style.width`), 15000);   // la página termina de cargarse y colocarse antes de dibujar
+  await sleep(300);
+  await shot('16-ocultar');
+  await audit('ocultar (móvil)');
+  await clickText('.red-types .btn', 'Tapar en negro');
+  const r0 = await rectOf('.crop-img');
+  // recuadro sobre el título de la factura (parte alta izquierda)
+  await drag([r0.x + r0.w * 0.12, r0.y + r0.h * 0.10], [r0.x + r0.w * 0.62, r0.y + r0.h * 0.20]);
+  check('al arrastrar aparece el recuadro', (await count('.red-rect')) === 1);
+  await drag([r0.x + r0.w * 0.12, r0.y + r0.h * 0.40], [r0.x + r0.w * 0.60, r0.y + r0.h * 0.48]);   // segundo (lo borraremos con la ✕)
+  check('se pueden dibujar varios recuadros', (await count('.red-rect')) === 2);
+  const xs = await c.ev(`[...document.querySelectorAll('.red-x circle')].map(e=>{const r=e.getBoundingClientRect(); return [r.left+r.width/2, r.top+r.height/2]})`);
+  await drag(xs[xs.length - 1], xs[xs.length - 1], 1);
+  check('la ✕ quita un recuadro', (await count('.red-rect')) === 1);
+  await clickText('.crop-foot .btn', 'Aplicar');
+  await wf(() => c.ev(`!document.querySelector('.crop') && !document.querySelector('.ed-stage.working')`), 30000);
+  let pg = await myPage();
+  check('la zona queda guardada en la página', pg && pg.marks.length === 1 && pg.marks[0].t === 'blk', JSON.stringify(pg));
+  const m0 = pg.marks[0], cx = m0.x + m0.w / 2, cy = m0.y + m0.h / 2;
+  const black = await px(cx, cy);
+  check('la imagen mostrada tiene la zona tapada en negro', black.every((v) => v < 10), black.join(','));
+  await shot('16b-ocultar-aplicado');
+  // el giro gira también la zona
+  await clickText('.ed-tool', 'Girar');
+  await wf(() => c.ev(`!document.querySelector('.ed-stage.working') && (()=>{const i=document.querySelector('.ed-img'); return i.naturalWidth > i.naturalHeight})()`), 30000);
+  pg = await myPage();
+  const m1 = pg.marks[0], rcx = m1.x + m1.w / 2, rcy = m1.y + m1.h / 2;
+  check('al girar, la zona gira con la página', Math.abs(rcx - (1 - cy)) < 0.01 && Math.abs(rcy - cx) < 0.01, JSON.stringify(m1));
+  const black2 = await px(rcx, rcy);
+  check('tras girar, la zona sigue tapada en negro', black2.every((v) => v < 10), black2.join(','));
+  // volver a abrir: la zona aparece y se puede quitar
+  for (let i = 0; i < 3; i++) { await clickText('.ed-tool', 'Girar'); await sleep(150); }
+  await wf(() => c.ev(`!document.querySelector('.ed-stage.working') && (()=>{const i=document.querySelector('.ed-img'); return i.naturalHeight > i.naturalWidth})()`), 30000);
+  await clickText('.ed-tool', 'Ocultar'); await wf(() => exists('.crop .red-types'), 5000);
+  check('al reabrir se ve la zona guardada', !!(await wf(() => c.ev(`document.querySelectorAll('.red-rect').length===1`), 6000)));
+  const xs2 = await c.ev(`[...document.querySelectorAll('.red-x circle')].map(e=>{const r=e.getBoundingClientRect(); return [r.left+r.width/2, r.top+r.height/2]})`);
+  await drag(xs2[0], xs2[0], 1);
+  await clickText('.crop-foot .btn', 'Aplicar');
+  await wf(() => c.ev(`!document.querySelector('.crop') && !document.querySelector('.ed-stage.working')`), 30000);
+  pg = await myPage();
+  check('quitar la zona la elimina de la página', pg.marks.length === 0, JSON.stringify(pg.marks));
+  const back = await px(cx, cy);
+  check('la imagen recupera el contenido bajo la zona quitada', back.some((v) => v > 40), back.join(','));
+  // pixelar
+  await clickText('.ed-tool', 'Ocultar'); await wf(() => exists('.crop .red-types'), 5000);
+  await wf(() => c.ev(`!!(document.querySelector('.crop-img')||{}).style.width`), 6000);
+  await clickText('.red-types .btn', 'Pixelar');
+  const r1 = await rectOf('.crop-img');
+  await drag([r1.x + r1.w * 0.1, r1.y + r1.h * 0.1], [r1.x + r1.w * 0.7, r1.y + r1.h * 0.25]);
+  await clickText('.crop-foot .btn', 'Aplicar');
+  await wf(() => c.ev(`!document.querySelector('.crop') && !document.querySelector('.ed-stage.working')`), 30000);
+  pg = await myPage();
+  check('pixelar queda guardado', pg.marks.length === 1 && pg.marks[0].t === 'pix', JSON.stringify(pg.marks));
+  // cambiar el recorte avisa de que se quitan las zonas
+  await clickText('.ed-tool', 'Recortar'); await wf(() => c.ev(`document.querySelectorAll('.crop-h').length===4 && !!document.querySelector('.crop-h').getAttribute('cx')`), 8000);   // el recorte termina de prepararse (foto + detección) antes de aceptar toques
+  await clickText('.crop-foot .btn', 'Toda la imagen'); await clickText('.crop-foot .btn', 'Aplicar');
+  check('volver a recortar avisa de que se quitarán las zonas', !!(await wf(() => c.ev(`/zonas ocultas/.test((document.querySelector('.backdrop')||{}).textContent||'')`), 5000)));
+  await clickText('.backdrop .btn', 'Recortar');
+  await wf(() => c.ev(`!document.querySelector('.crop') && !document.querySelector('.ed-stage.working')`), 30000);
+  pg = await myPage();
+  check('tras confirmar el nuevo recorte no quedan zonas', pg.marks.length === 0, JSON.stringify(pg.marks));
+  await closeSheets(); await click('.ed-top .icon-btn'); await sleep(400);
+};
+
+// Lector de QR en Herramientas
+G.qr = async () => {
+  const QR = require('qrcode');
+  const file = path.join(DL, 'qr-prueba.png');
+  await QR.toFile(file, 'https://wilscan.app/hola', { width: 600, margin: 3 });
+  await c.ev(`WilScan.show('tools'); true`); await sleep(300);
+  await closeSheets(); await clickText('.tool-tx b', 'Leer código QR'); await wf(() => exists('.sheet'), 4000);
+  await audit('hoja Leer código QR (móvil)');
+  await c.setFiles('.sheet input[type=file]', [file]); await sleep(400);
+  await clickText('.sheet-foot .btn', 'Leer código');
+  const ok = await wf(() => c.ev(`/wilscan\\.app\\/hola/.test((document.querySelector('.sheet')||{}).textContent||'')`), 20000);
+  check('lee el QR y muestra su contenido', !!ok, String((await text('.sheet')) || '').slice(0, 160));
+  await shot('17-qr');
+  await closeSheets();
 };
 
 G.ajustes = async () => {
@@ -439,7 +532,7 @@ G.diseno = async () => {
   c = await launch({ url: BASE + '/', mobile: true, fakeVideo: path.join(FX, 'camara.y4m'), downloadDir: DL });
   await c.until(() => c.ev(`document.documentElement.dataset.ready==='1'`), 15000);
   await sleep(500);
-  for (const name of ['arranque', 'escaneo', 'editor', 'exportar', 'compartir', 'paginas', 'biblioteca', 'herramientas', 'firma', 'torcida', 'ajustes', 'diseno']) {
+  for (const name of ['arranque', 'escaneo', 'editor', 'exportar', 'compartir', 'paginas', 'biblioteca', 'herramientas', 'firma', 'torcida', 'ocultar', 'qr', 'ajustes', 'diseno']) {
     if (only.length && !only.some((o) => name.includes(o))) continue;
     group = name; console.log(`\n▶ ${name}`);
     const nlogs = c.logs.length;

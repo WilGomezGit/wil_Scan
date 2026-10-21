@@ -40,7 +40,7 @@ export function initSettings() {
         h('div', { class: 'section-title', text: 'Texto (OCR)' }),
         h('div', { class: 'card pad' }, sel('Idioma de los documentos', LANGS.map((l) => [l.id, l.label]), 'ocrLang'), h('p', { class: 'hint', text: 'El reconocimiento de texto funciona sin conexión; los idiomas van incluidos en la app.' })),
         h('div', { class: 'section-title', text: 'PDF' }),
-        h('div', { class: 'card pad' }, sel('Tamaño de página', [['a4', 'A4'], ['letter', 'Carta (Letter)'], ['fit', 'Ajustado a la imagen']], 'pdfSize'), sel('Calidad de imagen', [['normal', 'Normal (archivo más ligero)'], ['high', 'Alta'], ['max', 'Máxima']], 'quality'), chk('Dejar márgenes', 'pdfMargin'), chk('PDF buscable por defecto', 'searchablePdf', 'Reconoce el texto para poder buscarlo y copiarlo dentro del PDF. Tarda más al exportar.'))),
+        h('div', { class: 'card pad' }, sel('Tamaño de página', [['auto', 'Automático (según la foto)'], ['a4', 'A4'], ['letter', 'Carta (Letter)'], ['fit', 'Ajustado a la imagen']], 'pdfSize'), sel('Calidad de imagen', [['normal', 'Normal (archivo más ligero)'], ['high', 'Alta'], ['max', 'Máxima']], 'quality'), chk('Dejar márgenes', 'pdfMargin'), chk('PDF buscable por defecto', 'searchablePdf', 'Reconoce el texto para poder buscarlo y copiarlo dentro del PDF. Tarda más al exportar.'))),
       h('div', {},
         h('div', { class: 'section-title', text: 'Aplicación' }),
         h('div', { class: 'card pad' },

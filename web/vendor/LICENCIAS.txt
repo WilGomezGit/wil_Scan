@@ -6,5 +6,6 @@ WilScan usa estas librerías de código abierto, incluidas sin modificar:
 - Tesseract.js · Apache-2.0 — tesseract.js@7.0.0 — https://github.com/naptha/tesseract.js
 - Tesseract core · Apache-2.0 — tesseract.js-core@7.0.0 — https://github.com/naptha/tesseract.js-core
 - Datos de idioma (spa, eng) · Apache-2.0 — @tesseract.js-data/spa@1.0.0 — https://github.com/naptha/tessdata
+- jsQR · Apache-2.0 — jsqr@1.4.0
 
 Los textos completos de las licencias están en cada paquete de npm (carpeta node_modules/<paquete>/LICENSE).

@@ -5,6 +5,7 @@ import { buildPdf } from '../core/pdf-export.js';
 import * as T from '../core/pdf-tools.js';
 import { importPdf } from '../core/docs.js';
 import { recognize, LANGS } from '../core/ocr.js';
+import { readQr } from '../core/qr.js';
 import { sendFiles } from './send.js';
 import { getSettings, getSignature, setSignature } from '../lib/settings.js';
 
@@ -19,6 +20,7 @@ const GROUPS = [
     { id: 'pdf2img', icon: 'image', title: 'PDF a imágenes', desc: 'Cada página como JPG o PNG' },
     { id: 'pdf2txt', icon: 'text', title: 'PDF a texto', desc: 'Extrae el texto (con OCR si es un escaneo)' },
     { id: 'img2txt', icon: 'scan', title: 'Imagen a texto', desc: 'Reconoce el texto de una foto (OCR)' },
+    { id: 'qr', icon: 'qr', title: 'Leer código QR', desc: 'Enlaces, WiFi o contactos de una foto' },
     { id: 'importpdf', icon: 'upload', title: 'Importar PDF', desc: 'Edítalo como documento escaneado' },
   ]],
   ['Organizar PDF', [
@@ -219,6 +221,20 @@ const OPEN = {
         const text = parts.map((p, i) => (files.length > 1 ? `--- ${files[i].name} ---\n` : '') + p).join('\n\n');
         if (!text.trim()) throw new Error('No se encontró texto. Prueba con una foto más nítida y bien iluminada.');
         return { files: [{ name: (files.length === 1 ? base(files[0]) : 'Texto ' + stamp()) + '.txt', blob: new Blob([text], { type: 'text/plain;charset=utf-8' }) }], note: text.length > 400 ? text.slice(0, 400) + '…' : text };
+      } });
+  },
+  qr(t) {
+    toolSheet({ title: t.title, desc: 'Lee el código QR de una foto o captura: enlaces, redes WiFi, contactos, pagos…', accept: 'image/*', multiple: true, action: 'Leer código',
+      run: async (files, b) => {
+        const found = [];
+        for (let i = 0; i < files.length; i++) {
+          b.update(`Buscando el código · imagen ${i + 1} de ${files.length}`, i / files.length);
+          const bmp = await createImageBitmap(files[i]); const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height; c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
+          const v = await readQr(c); if (v) found.push(v);
+        }
+        if (!found.length) throw new Error('No se encontró ningún código QR. Acércate más y que salga entero y bien iluminado.');
+        const text = found.join('\n');
+        return { files: [{ name: 'Codigo QR ' + stamp() + '.txt', blob: new Blob([text], { type: 'text/plain;charset=utf-8' }) }], note: text.length > 600 ? text.slice(0, 600) + '…' : text };
       } });
   },
   importpdf(t) {

@@ -3,7 +3,7 @@ import { kvGet, kvSet } from '../core/db.js';
 
 export const DEFAULTS = {
   ocrLang: 'spa+eng',      // spa | eng | spa+eng
-  pdfSize: 'a4',           // a4 | letter | fit
+  pdfSize: 'auto',         // auto | a4 | letter | fit
   pdfMargin: true,
   quality: 'high',         // normal | high | max
   searchablePdf: true,     // PDF con texto buscable (usa OCR)

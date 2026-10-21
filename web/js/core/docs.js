@@ -152,6 +152,8 @@ export async function rotatePage(page) {
   const t = timer('Girar');
   const out = rotateCanvas(await blobToCanvas(page.out), 90), thumb = rotateCanvas(await blobToCanvas(page.thumb), 90); t.step('girar');
   Object.assign(page, { rot: ((page.rot || 0) + 90) % 360, out: await toBlob(out, 'image/jpeg', Math.max(quality(), 0.92)), thumb: await toBlob(thumb, 'image/jpeg', 0.75), w: out.width, h: out.height, text: null, textLang: null, words: null });
+  // las zonas ocultas giran con la página: (x, y) → (1 − y − alto, x)
+  if (page.marks && page.marks.length) page.marks = page.marks.map((m) => ({ ...m, x: 1 - m.y - m.h, y: m.x, w: m.h, h: m.w }));
   dropPre(page.id); page.rev = Date.now() + Math.random();
   await savePage(page); t.step('guardar'); t.end();
   ocrLater([page]);

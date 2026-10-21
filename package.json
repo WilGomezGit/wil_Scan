@@ -19,6 +19,7 @@
     "@techstark/opencv-js": "5.0.0-release.1",
     "@tesseract.js-data/eng": "1.0.0",
     "@tesseract.js-data/spa": "1.0.0",
+    "jsqr": "^1.4.0",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.4.299",
     "tesseract.js": "7.0.0",
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "8.5.3",
+    "qrcode": "^1.5.4",
     "ws": "8.18.0"
   }
 }

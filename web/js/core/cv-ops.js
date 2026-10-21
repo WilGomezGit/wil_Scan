@@ -161,6 +161,14 @@ function sharpen(cv, m, amount = 0.6) {
   } finally { free(half, blur); }
 }
 
+// Oscurece los tonos medios (g > 1): los trazos finos de lápiz o tiza quedan firmes sin ensuciar el fondo blanco
+function darken(m, g) {
+  const lut = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) lut[i] = Math.round(255 * Math.pow(i / 255, g));
+  const d = m.data;
+  for (let i = 0; i < d.length; i++) d[i] = lut[d[i]];
+}
+
 function saturate(img, k) {
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
@@ -177,15 +185,17 @@ export function filter(cv, img, { filter = 'auto', bright = 0, contrast = 0 } = 
     cv.cvtColor(mat, rgb, cv.COLOR_RGBA2RGB);
     if (filter === 'original') cur = rgb.clone();
     else {
-      const colour = filter === 'sombras' || filter === 'auto' || filter === 'color';
+      const colour = filter === 'sombras' || filter === 'auto' || filter === 'color' || filter === 'nitido';
       const flat = colour ? flatten(cv, rgb) : null;
       if (filter === 'sombras') cur = flat;
-      else if (colour) { cur = sharpen(cv, flat, 0.7); free(flat); }
+      else if (colour) { cur = sharpen(cv, flat, filter === 'nitido' ? 1.6 : 0.7); free(flat); }
       else {
         // grises y blanco y negro: se pasa a un canal ANTES de quitar sombras (un tercio del trabajo)
         const g0 = new cv.Mat(); cv.cvtColor(rgb, g0, cv.COLOR_RGB2GRAY);
+        if (filter === 'pizarra') cv.bitwise_not(g0, g0);      // tiza clara sobre fondo oscuro → trazo oscuro sobre fondo claro
         const gray = flatten(cv, g0); free(g0);
         if (filter === 'gris') { cur = gray; }
+        else if (filter === 'nota' || filter === 'pizarra') { darken(gray, filter === 'nota' ? 2.4 : 2); cur = gray; }
         else {   // bn
           const bw = new cv.Mat();
           cv.GaussianBlur(gray, gray, new cv.Size(3, 3), 0);

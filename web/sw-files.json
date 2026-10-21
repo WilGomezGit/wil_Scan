@@ -1,5 +1,5 @@
 {
- "version": "4af19f7f00",
+ "version": "78b47747a1",
  "shell": [
   "./",
   "assets/icon-192.png",
@@ -29,6 +29,7 @@
   "js/core/pages.js",
   "js/core/pdf-export.js",
   "js/core/pdf-tools.js",
+  "js/core/qr.js",
   "js/core/share.js",
   "js/core/warp.js",
   "js/lib/dom.js",
@@ -38,6 +39,7 @@
   "js/ui/editor.js",
   "js/ui/export-flow.js",
   "js/ui/library.js",
+  "js/ui/redact.js",
   "js/ui/scan.js",
   "js/ui/send.js",
   "js/ui/settings-view.js",
@@ -47,6 +49,7 @@
  ],
  "vendor": [
   "vendor/LICENCIAS.txt",
+  "vendor/jsqr/jsQR.js",
   "vendor/opencv/opencv.js",
   "vendor/pdf-lib/pdf-lib.min.js",
   "vendor/pdfjs/pdf.min.js",

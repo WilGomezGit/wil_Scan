@@ -21,8 +21,11 @@ for (const v of ['tesseract-core-lstm', 'tesseract-core-simd-lstm', 'tesseract-c
 // Datos de idioma (Apache-2.0). Tesseract espera .traineddata.gz
 for (const l of ['spa', 'eng']) copy(`@tesseract.js-data/${l}/4.0.0/${l}.traineddata.gz`, `tesseract/lang/${l}.traineddata.gz`);
 
+// jsQR (Apache-2.0): leer códigos QR
+copy('jsqr/dist/jsQR.js', 'jsqr/jsQR.js');
+
 // avisos de licencia
-const lic = [['@techstark/opencv-js', 'OpenCV.js · Apache-2.0'], ['pdf-lib', 'pdf-lib · MIT'], ['pdfjs-dist', 'PDF.js · Apache-2.0'], ['tesseract.js', 'Tesseract.js · Apache-2.0'], ['tesseract.js-core', 'Tesseract core · Apache-2.0'], ['@tesseract.js-data/spa', 'Datos de idioma (spa, eng) · Apache-2.0']];
+const lic = [['@techstark/opencv-js', 'OpenCV.js · Apache-2.0'], ['pdf-lib', 'pdf-lib · MIT'], ['pdfjs-dist', 'PDF.js · Apache-2.0'], ['tesseract.js', 'Tesseract.js · Apache-2.0'], ['tesseract.js-core', 'Tesseract core · Apache-2.0'], ['@tesseract.js-data/spa', 'Datos de idioma (spa, eng) · Apache-2.0'], ['jsqr', 'jsQR · Apache-2.0']];
 const lines = ['WilScan usa estas librerías de código abierto, incluidas sin modificar:', ''];
 for (const [pkg, name] of lic) { const j = JSON.parse(fs.readFileSync(nm(pkg + '/package.json'), 'utf8')); lines.push(`- ${name} — ${pkg}@${j.version}${j.homepage ? ' — ' + j.homepage : ''}`); }
 lines.push('', 'Los textos completos de las licencias están en cada paquete de npm (carpeta node_modules/<paquete>/LICENSE).');

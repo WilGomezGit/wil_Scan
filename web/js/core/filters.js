@@ -1,4 +1,4 @@
-// Filtros de documento con OpenCV: quitar sombras, mejorar, grises, blanco y negro y color vivo, más brillo y contraste.
+// Filtros de documento con OpenCV: quitar sombras, mejorar, grises, blanco y negro, color vivo, nítido, nota a lápiz y pizarra, más brillo y contraste.
 import { cvRun, canvasFrom, imageOf, canvasOf } from './cv.js';
 
 export const FILTERS = [
@@ -8,6 +8,9 @@ export const FILTERS = [
   { id: 'color', label: 'Color vivo' },
   { id: 'gris', label: 'Grises' },
   { id: 'bn', label: 'Blanco y negro' },
+  { id: 'nitido', label: 'Nítido' },
+  { id: 'nota', label: 'Nota a lápiz' },
+  { id: 'pizarra', label: 'Pizarra' },
 ];
 
 // opts: { filter, bright (-50..50), contrast (-50..50) }  →  lienzo nuevo

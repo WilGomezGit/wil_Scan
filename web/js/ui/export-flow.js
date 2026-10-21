@@ -12,7 +12,7 @@ export async function openExport(doc, { pages = null, mode = 'share' } = {}) {
   const seg = h('div', { class: 'seg', attrs: { role: 'tablist' } });
   const fmts = [['pdf', 'PDF'], ['jpg', 'Imágenes'], ['txt', 'Texto']];
   const name = h('input', { type: 'text', value: safeName(doc.title), maxLength: 80, attrs: { 'aria-label': 'Nombre del archivo' } });
-  const size = h('select', { attrs: { 'aria-label': 'Tamaño de página' } }, h('option', { value: 'a4', text: 'A4' }), h('option', { value: 'letter', text: 'Carta (Letter)' }), h('option', { value: 'fit', text: 'Ajustado a la imagen' }));
+  const size = h('select', { attrs: { 'aria-label': 'Tamaño de página' } }, h('option', { value: 'auto', text: 'Automático (según la foto)' }), h('option', { value: 'a4', text: 'A4' }), h('option', { value: 'letter', text: 'Carta (Letter)' }), h('option', { value: 'fit', text: 'Ajustado a la imagen' }));
   size.value = st.pdfSize;
   const margin = h('input', { type: 'checkbox', checked: !!st.pdfMargin });
   const search = h('input', { type: 'checkbox', checked: !!st.searchablePdf });

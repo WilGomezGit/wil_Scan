@@ -8,6 +8,7 @@ import { applyFilter, FILTERS } from '../core/filters.js';
 import { detectQuad } from '../core/detect.js';
 import { canvasOf } from '../core/cv.js';
 import { openCropper } from './crop.js';
+import { openRedact } from './redact.js';
 import { openText } from './text.js';
 import { openExport } from './export-flow.js';
 import { openScanner } from './scan.js';
@@ -88,7 +89,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   }
   function drawTools() {
     tools.textContent = '';
-    const defs = [['crop', 'Recortar', doCrop], ['filter', 'Filtros', after(() => doFilters(false))], ['rotate', 'Girar', doRotate], ['text', 'Texto', after(() => openText(doc, pages, idx))], ['layers', 'Ordenar', after(doOrder)], ['trash', 'Eliminar', after(doDeletePage)]];
+    const defs = [['crop', 'Recortar', doCrop], ['filter', 'Filtros', after(() => doFilters(false))], ['rotate', 'Girar', doRotate], ['hide', 'Ocultar', after(doRedact)], ['text', 'Texto', after(() => openText(doc, pages, idx))], ['layers', 'Ordenar', after(doOrder)], ['trash', 'Eliminar', after(doDeletePage)]];
     for (const [ic, label, fn] of defs) tools.append(h('button', { class: 'ed-tool', attrs: { type: 'button' }, on: { click: fn } }, icon(ic), h('span', { text: label })));
   }
   // Carrusel de filtros: toca uno para aplicarlo a la página (o a todas), con vista previa de cada filtro sobre la página actual
@@ -173,9 +174,19 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     if (pendingN) await withBusy('Terminando los cambios…', () => work);
     const q = await openCropper(p);
     if (q === undefined) return;
-    dropSmall(p.id);
     const patch = { quad: q, skew: q ? 0 : p.skew };
+    if (p.marks && p.marks.length) {   // al cambiar el recorte las zonas ocultas ya no coincidirían
+      if (!(await confirmBox({ title: 'Se quitarán las zonas ocultas', text: 'Al volver a recortar, las zonas pixeladas o tapadas se quitan porque ya no coincidirían. Podrás marcarlas de nuevo después.', ok: 'Recortar' }))) return;
+      patch.marks = [];
+    }
+    dropSmall(p.id);
     inBackground(p, smallBase({ ...p, ...patch }).then((b) => applyFilter(b, { filter: p.filter || 'auto', bright: p.bright || 0, contrast: p.contrast || 0 })), () => updatePage(p, patch));
+  }
+  async function doRedact() {
+    const p = cur();
+    const marks = await openRedact(p);
+    if (marks === undefined) return;
+    inBackground(p, null, () => updatePage(p, { marks }));
   }
   async function doRotate() {
     const p = cur(), shown = !live.hidden ? live : img;

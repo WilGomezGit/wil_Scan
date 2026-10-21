@@ -17,13 +17,21 @@ export function loadPdfLib() {
 export const PAGE_SIZES = { a4: [595.28, 841.89], letter: [612, 792] };
 
 // pages: [{ blob (JPEG), w, h, words? [{text,x0,y0,x1,y1}] }]  →  Uint8Array
-// opts: { size: 'a4'|'letter'|'fit', margin (pt), title, author }
-export async function buildPdf(pages, { size = 'a4', margin = 0, title = '', author = 'WilScan' } = {}) {
+// opts: { size: 'auto'|'a4'|'letter'|'fit', margin (pt), title, author }
+// Papel que mejor encaja con la proporción de la foto: A4, Carta o, si no se parece a ninguno (recibo, tarjeta…), ajustado a la imagen
+export function pickPaper(w, h) {
+  const r = Math.max(w, h) / Math.min(w, h), a4 = Math.abs(r - 1.4142) / 1.4142, lt = Math.abs(r - 1.2941) / 1.2941;
+  if (Math.min(a4, lt) > 0.08) return 'fit';
+  return a4 <= lt ? 'a4' : 'letter';
+}
+
+export async function buildPdf(pages, { size: sizeOpt = 'auto', margin = 0, title = '', author = 'WilScan' } = {}) {
   const { PDFDocument, StandardFonts } = await loadPdfLib();
   const pdf = await PDFDocument.create();
   pdf.setTitle(title || 'Documento'); pdf.setAuthor(author); pdf.setCreator('WilScan · WG'); pdf.setProducer('WilScan');
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   for (const p of pages) {
+    const size = sizeOpt === 'auto' ? pickPaper(p.w, p.h) : sizeOpt;
     const img = await pdf.embedJpg(new Uint8Array(await p.blob.arrayBuffer()));
     let pw, ph;
     if (size === 'fit') { const k = 842 / Math.max(p.w, p.h); pw = p.w * k; ph = p.h * k; }
