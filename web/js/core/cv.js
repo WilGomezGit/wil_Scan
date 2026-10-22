@@ -9,6 +9,16 @@ export function timer(label) {
   return { step(name) { steps.push(name + ' ' + Math.round(performance.now() - t0)); }, end() { perf.log.unshift(`${label}: ${Math.round(performance.now() - t0)} ms (${steps.join(' · ')})`); perf.log.length = Math.min(perf.log.length, 12); } };
 }
 
+// Si Android cierra un motor (p. ej. por falta de memoria) no avisa: su tarea nunca terminaría y todo lo que va detrás
+// quedaría esperando (el círculo de carga no se iría). Cada tarea tiene un tiempo máximo según lo que suele tardar;
+// si se pasa, ese motor se descarta y la tarea se repite en otro.
+const slowest = {};
+const limitFor = (op, args) => {
+  const px = args.reduce((n, a) => n + (a && a.width ? a.width * a.height : 0), 0) / 1e6;
+  return slowest[op] ? Math.max(4000, slowest[op] * 4, px * 1500) : Math.max(15000, px * 4000);   // la 1.ª vez, margen amplio
+};
+const retryable = (msg) => Object.assign(new Error(msg), { retry: true });
+
 function workerEngine() {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') return reject(new Error('sin Worker'));
@@ -19,15 +29,15 @@ function workerEngine() {
     const failAll = (err) => { for (const p of pending.values()) p.reject(err); pending.clear(); };
     w.onmessage = (e) => {
       const m = e.data;
-      if (m.ready) { ready = true; perf.engine = `Worker (segundo plano) · listo en ${Math.round(performance.now() - tw)} ms` + (m.ms ? ` (leer ${m.ms.leer} · iniciar ${m.ms.iniciar})` : ''); const h = w.__h = { dead: false, last: performance.now(), busy: () => pending.size, stop: () => { h.dead = true; w.terminate(); failAll(new Error('motor cerrado')); }, run: (op, args, transfer) => new Promise((res, rej) => { h.last = performance.now(); const id = ++seq; pending.set(id, { resolve: res, reject: rej, op, t0: performance.now() }); w.postMessage({ id, op, args }, transfer || []); }) }; resolve(h); return; }
+      if (m.ready) { ready = true; perf.engine = `Worker (segundo plano) · listo en ${Math.round(performance.now() - tw)} ms` + (m.ms ? ` (leer ${m.ms.leer} · iniciar ${m.ms.iniciar})` : ''); const h = w.__h = { dead: false, last: performance.now(), busy: () => pending.size, stop: (why = 'motor cerrado') => { if (h.dead) return; h.dead = true; w.terminate(); failAll(retryable(why)); }, run: (op, args, transfer) => new Promise((res, rej) => { if (h.dead) return rej(retryable('motor cerrado')); h.last = performance.now(); const id = ++seq; const t = setTimeout(() => { if (pending.has(id)) h.stop('el motor de imagen dejó de responder'); }, limitFor(op, args)); pending.set(id, { resolve: (v) => { clearTimeout(t); res(v); }, reject: (e) => { clearTimeout(t); rej(e); }, op, t0: performance.now() }); w.postMessage({ id, op, args }, transfer || []); }) }; resolve(h); return; }
       if (m.fatal) { w.terminate(); return reject(new Error(m.fatal)); }
       const p = pending.get(m.id);
       if (!p) return;
       pending.delete(m.id);
-      if (m.ms != null) { perf.ops = perf.ops || []; perf.ops.unshift(`${p.op}: ${m.ms} ms en el motor · ${Math.round(performance.now() - p.t0)} ms en total`); perf.ops.length = Math.min(perf.ops.length, 20); }
+      if (m.ms != null) { slowest[p.op] = Math.max(slowest[p.op] || 0, m.ms); perf.ops = perf.ops || []; perf.ops.unshift(`${p.op}: ${m.ms} ms en el motor · ${Math.round(performance.now() - p.t0)} ms en total`); perf.ops.length = Math.min(perf.ops.length, 20); }
       if (m.error) p.reject(new Error(m.error)); else p.resolve(m.res);
     };
-    w.onerror = (e) => { const err = new Error(e.message || 'error del motor de imagen'); if (!ready) { w.terminate(); reject(err); } else { failAll(err); if (w.__h) w.__h.dead = true; } };
+    w.onerror = (e) => { const err = new Error(e.message || 'error del motor de imagen'); if (!ready) { w.terminate(); reject(err); } else { if (w.__h) w.__h.stop(err.message); else failAll(err); } };
   });
 }
 
@@ -62,7 +72,8 @@ export function loadCV() {
 // y el teléfono tiene núcleos y memoria de sobra; los extra se cierran tras 45 s sin uso para liberar memoria.
 export function cvLanes() {
   const cores = navigator.hardwareConcurrency || 2, mem = navigator.deviceMemory || 4;
-  let n = cores >= 6 && mem >= 4 ? 3 : cores >= 4 && mem >= 3 ? 2 : 1;
+  // cada motor ocupa bastante memoria; con poca, Android los cierra sin avisar: como mucho 2 y solo con memoria de sobra
+  let n = cores >= 6 && mem >= 6 ? 2 : 1;
   try { const o = +localStorage.getItem('wilscan-lanes'); if (o >= 1 && o <= 4) n = o; } catch { /* sin almacenamiento */ }
   return n;
 }
@@ -74,6 +85,7 @@ setInterval(() => {
 function pick(first) {
   if (!first.busy) return first;                                   // motor en el hilo principal: sin grupo
   const all = [first, ...extra].filter((w) => !w.dead);
+  if (!all.length) return first;
   const best = all.reduce((a, b) => (b.busy() < a.busy() ? b : a));
   if (best.busy() > 0 && all.length < cvLanes() && !spawning && !failedSpawn) {
     spawning = true;
@@ -82,16 +94,24 @@ function pick(first) {
   return best;
 }
 
-// Ejecuta una operación de cv-ops.js. Las imágenes ({ data, width, height }) se transfieren sin copiar.
+// Ejecuta una operación de cv-ops.js con imágenes { data, width, height }.
 let lastUse = 0;
 export const cvIdleFor = (ms) => performance.now() - lastUse > ms;
 
+// Las imágenes se copian al motor (no se transfieren) para poder repetir la tarea si ese motor se cae.
 export async function cvRun(op, args) {
-  lastUse = performance.now();
-  await loadCV();
-  const eng = await engine;
-  try { return await pick(eng).run(op, args, args.filter((a) => a && a.data && a.data.buffer).map((a) => a.data.buffer)); }
-  finally { lastUse = performance.now(); }
+  for (let attempt = 0; ; attempt++) {
+    lastUse = performance.now();
+    await loadCV();
+    const eng = await engine;
+    if (eng.dead && !extra.some((w) => !w.dead)) { engine = null; continue; }     // el motor principal se cayó: se abre otro
+    try { return await pick(eng).run(op, args); }
+    catch (e) {
+      if (!e.retry || attempt >= 2) throw e;
+      perf.restarts = (perf.restarts || 0) + 1;
+      if (eng.dead) engine = null;
+    } finally { lastUse = performance.now(); }
+  }
 }
 
 export const imageOf = (canvas) => canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);

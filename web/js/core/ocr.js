@@ -53,8 +53,8 @@ function prepare(canvas, maxSide = 1800) {
 function isBinary(c) {
   const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data;
   let n = 0, bin = 0;
-  for (let i = 0; i < d.length; i += 4 * 37) { n++; if (d[i] < 12 || d[i] > 243) bin++; }
-  return bin / n > 0.97;
+  for (let i = 0; i < d.length; i += 4 * 37) { n++; if (d[i] < 6 || d[i] > 249) bin++; }
+  return bin / n > 0.99;   // estricto: un «Mejorado» con letra negra se parece al blanco y negro, pero aún conviene binarizarlo
 }
 
 // Devuelve { text, confidence, words:[{text, x0,y0,x1,y1}] } con coordenadas del lienzo original.
