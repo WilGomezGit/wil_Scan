@@ -134,7 +134,17 @@ const odd = (n) => { n = Math.max(3, Math.round(n)); return n % 2 ? n : n + 1; }
 // Divide cada píxel por el fondo estimado (papel sin texto): elimina sombras y degradados de luz. Devuelve RGB.
 // Vale para color (3 canales) y para grises (1 canal: tres veces menos trabajo).
 // El fondo es una superficie lisa: se estima a ~320 px (antes 600), con el mismo resultado visual y mucho menos cálculo.
-function flatten(cv, rgb) {
+// ¿Imagen digital ya limpia (captura de pantalla, PDF)? Tiene mucho blanco puro; una foto de papel casi nunca.
+// En ellas no hay sombras que quitar y «aplanar» el fondo estropearía las zonas de color (barras, botones).
+function isClean(m) {
+  const d = m.data, ch = m.channels(); let n = 0, white = 0;
+  for (let i = 0; i < d.length; i += ch * 13) { n++; if ((ch === 1 ? d[i] : (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8) >= 248) white++; }
+  return white / n > 0.3;
+}
+
+// tone: si se pide, el papel conserva su color natural (crema, amarillento…) en vez de quedar blanco puro
+function flatten(cv, rgb, tone = false) {
+  if (isClean(rgb)) return rgb.clone();
   const w = rgb.cols, h = rgb.rows, k = Math.max(1, Math.max(w, h) / 320);
   const small = new cv.Mat(), dil = new cv.Mat(), med = new cv.Mat(), bg = new cv.Mat(), out = new cv.Mat();
   const ker = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
@@ -145,6 +155,11 @@ function flatten(cv, rgb) {
     cv.GaussianBlur(med, med, new cv.Size(0, 0), 3);
     cv.resize(med, bg, new cv.Size(w, h), 0, 0, cv.INTER_LINEAR);
     cv.divide(rgb, bg, out, 255, -1);
+    if (tone && rgb.channels() === 3) {
+      const m = cv.mean(med), top = Math.max(m[0], m[1], m[2], 1), t = [0, 1, 2].map((i) => Math.min(1, (m[i] / top) * 0.97));
+      const d = out.data;
+      for (let i = 0; i < d.length; i += 3) { d[i] = d[i] * t[0]; d[i + 1] = d[i + 1] * t[1]; d[i + 2] = d[i + 2] * t[2]; }
+    }
     return out;
   } finally { free(small, dil, med, bg, ker); }
 }
@@ -159,6 +174,20 @@ function sharpen(cv, m, amount = 0.6) {
     cv.addWeighted(m, 1 + amount, blur, -amount, 0, dst);
     return dst;
   } finally { free(half, blur); }
+}
+
+// Niveles automáticos: el tono más oscuro del texto pasa a negro (lo = percentil `dark`) y se aclara lo demás en proporción.
+// Da el aspecto «escaneado» nítido: papel blanco y letra negra firme.
+function levels(m, dark = 0.03, gamma = 1) {
+  const d = m.data, ch = m.channels(), hist = new Uint32Array(256);
+  let n = 0;
+  for (let i = 0; i < d.length; i += ch * 7) { hist[ch === 1 ? d[i] : (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8]++; n++; }
+  let acc = 0, lo = 0;
+  while (lo < 255 && (acc += hist[lo]) < n * dark) lo++;
+  lo = Math.min(lo, 110);
+  const lut = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) lut[i] = i <= lo ? 0 : Math.round(255 * Math.pow((i - lo) / (255 - lo), gamma));
+  for (let i = 0; i < d.length; i++) d[i] = lut[d[i]];
 }
 
 // Oscurece los tonos medios (g > 1): los trazos finos de lápiz o tiza quedan firmes sin ensuciar el fondo blanco
@@ -186,15 +215,18 @@ export function filter(cv, img, { filter = 'auto', bright = 0, contrast = 0 } = 
     if (filter === 'original') cur = rgb.clone();
     else {
       const colour = filter === 'sombras' || filter === 'auto' || filter === 'color' || filter === 'nitido';
-      const flat = colour ? flatten(cv, rgb) : null;
-      if (filter === 'sombras') cur = flat;
-      else if (colour) { cur = sharpen(cv, flat, filter === 'nitido' ? 1.6 : 0.7); free(flat); }
+      const flat = colour ? flatten(cv, rgb, filter === 'sombras') : null;
+      if (filter === 'sombras') cur = flat;                               // sin sombras, con el tono natural del papel
+      else if (colour) {
+        cur = sharpen(cv, flat, filter === 'nitido' ? 1.6 : 0.7); free(flat);
+        levels(cur, filter === 'color' ? 0.05 : 0.03, filter === 'color' ? 1.15 : 1);   // mejorado: papel blanco y letra negra · color vivo: más contraste
+      }
       else {
         // grises y blanco y negro: se pasa a un canal ANTES de quitar sombras (un tercio del trabajo)
         const g0 = new cv.Mat(); cv.cvtColor(rgb, g0, cv.COLOR_RGB2GRAY);
         if (filter === 'pizarra') cv.bitwise_not(g0, g0);      // tiza clara sobre fondo oscuro → trazo oscuro sobre fondo claro
         const gray = flatten(cv, g0); free(g0);
-        if (filter === 'gris') { cur = gray; }
+        if (filter === 'gris') { levels(gray, 0.005); cur = gray; }
         else if (filter === 'nota' || filter === 'pizarra') { darken(gray, filter === 'nota' ? 2.4 : 2); cur = gray; }
         else {   // bn
           const bw = new cv.Mat();
@@ -206,7 +238,7 @@ export function filter(cv, img, { filter = 'auto', bright = 0, contrast = 0 } = 
     }
     if (bright || contrast) { const adj = new cv.Mat(); cur.convertTo(adj, -1, 1 + contrast / 50, bright * 1.6); free(cur); cur = adj; }
     const out = toImage(cv, cur);
-    if (filter === 'color') saturate(out, 1.4);
+    if (filter === 'color') saturate(out, 1.9);
     return out;
   } finally { free(mat, rgb, cur); }
 }
