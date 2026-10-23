@@ -1,5 +1,6 @@
 // Cámara del dispositivo: abrir, cambiar entre trasera y frontal, linterna y captura a máxima resolución.
 import { canvasOf } from './cv.js';
+import { blobToCanvas } from './pages.js';
 
 export class Camera {
   constructor(video) { this.video = video; this.stream = null; this.track = null; this.facing = 'environment'; this.torchOn = false; }
@@ -40,13 +41,14 @@ export class Camera {
 
   // Foto a la máxima resolución del sensor si el navegador lo permite; si no, el fotograma del video
   async capture() {
+    // Si el video ya llega en alta resolución (≥ 2560 px de lado mayor: 4K), el fotograma del propio video es instantáneo y sobra para las
+    // páginas (se procesan a 1800–2400 px). La foto del sensor tarda de 1 a 3 s en muchos teléfonos: solo se pide cuando el video es de baja resolución.
+    if (Math.max(this.video.videoWidth, this.video.videoHeight) >= 2560) return this.frame();
     if (this.track && 'ImageCapture' in window) {
       try {
         const ic = new ImageCapture(this.track);
-        const blob = await Promise.race([ic.takePhoto(), new Promise((_, rej) => setTimeout(() => rej(new Error('tiempo')), 3500))]);
-        const bmp = await createImageBitmap(blob);
-        const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0);
-        if (bmp.close) bmp.close();
+        const blob = await Promise.race([ic.takePhoto(), new Promise((_, rej) => setTimeout(() => rej(new Error('tiempo')), 2500))]);
+        const c = await blobToCanvas(blob, 3000);                       // se decodifica ya reducida: no se carga la foto de 12 MP entera en memoria
         if (Math.min(c.width, c.height) >= Math.min(this.video.videoWidth, this.video.videoHeight)) return c;
       } catch { /* se usa el fotograma */ }
     }

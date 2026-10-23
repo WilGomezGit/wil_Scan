@@ -2,9 +2,9 @@
 import { h, icon, toast, confirmBox, promptBox, menuSheet, openSheet, withBusy, pushLayer, safeName } from '../lib/dom.js';
 import { getDoc, getPage, saveDoc, deleteDoc } from '../core/db.js';
 import { docPages, appendPages, removePage, updatePage, updateAllPages, reorderPages, rotatePage, finishLater } from '../core/docs.js';
-import { blobToCanvas, scaled } from '../core/pages.js';
-import { warpQuad, rotateCanvas } from '../core/warp.js';
-import { applyFilter, FILTERS } from '../core/filters.js';
+import { scaled, toBlob, previewBlobs, blobToCanvas } from '../core/pages.js';
+import { rotateCanvas } from '../core/warp.js';
+import { FILTERS } from '../core/filters.js';
 import { detectQuad } from '../core/detect.js';
 import { canvasOf } from '../core/cv.js';
 import { openCropper } from './crop.js';
@@ -28,13 +28,13 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   const img = h('img', { class: 'ed-img', alt: 'Página del documento', draggable: false });
   // vista previa: una imagen (no un canvas): en el WebView de Android un canvas ya visible que cambia de tamaño se ve en blanco
   const live = h('img', { class: 'ed-img ed-live', hidden: true, alt: '', draggable: false });
-  let liveTick = 0;
-  const asSrc = (c, q = 0.85) => c.toDataURL('image/jpeg', q);
+  let liveTick = 0, liveUrl = null;
   const wrap = h('div', { class: 'ed-wrap' }, img);   // la vista previa (live) va fuera: ocupa todo el escenario aunque cambie la proporción (al girar)
   const prev = h('button', { class: 'icon-btn solid ed-nav l', attrs: { type: 'button', 'aria-label': 'Página anterior' } }, icon('back'));
   const next = h('button', { class: 'icon-btn solid ed-nav r', attrs: { type: 'button', 'aria-label': 'Página siguiente' } }, icon('next'));
   const counter = h('div', { class: 'ed-counter', attrs: { 'aria-live': 'polite' } });
-  const stage = h('div', { class: 'ed-stage' }, wrap, live, prev, next, counter);
+  const prog = h('div', { class: 'ed-prog', hidden: true, attrs: { 'aria-live': 'polite' } });
+  const stage = h('div', { class: 'ed-stage' }, wrap, live, prev, next, counter, prog);
   const strip = h('div', { class: 'ed-strip', attrs: { role: 'list', 'data-scroll': true } });
   const fbar = h('div', { class: 'ed-flt', attrs: { 'data-scroll': true, role: 'group', 'aria-label': 'Filtros' } });
   const tools = h('div', { class: 'ed-tools' });
@@ -57,7 +57,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   };
   window.addEventListener('wilscan:page', onReady);
   finishLater(pages);
-  const pop = pushLayer(() => { closed = true; window.removeEventListener('wilscan:page', onReady); root.remove(); dropUrls(); onClose(); });
+  const pop = pushLayer(() => { closed = true; window.removeEventListener('wilscan:page', onReady); root.remove(); dropUrls(); if (liveUrl) URL.revokeObjectURL(liveUrl); for (const urls of fbCache.values()) urls.forEach((u) => URL.revokeObjectURL(u)); fbCache.clear(); clearTimeout(fbTimer); onClose(); });
   backBtn.addEventListener('click', () => pop());
 
   // ---------- pintar ----------
@@ -93,68 +93,82 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     const defs = [['crop', 'Recortar', doCrop], ['filter', 'Filtros', after(() => doFilters(false))], ['rotate', 'Girar', doRotate], ['hide', 'Ocultar', after(doRedact)], ['text', 'Texto', after(() => openText(doc, pages, idx))], ['layers', 'Ordenar', after(doOrder)], ['trash', 'Eliminar', after(doDeletePage)]];
     for (const [ic, label, fn] of defs) tools.append(h('button', { class: 'ed-tool', attrs: { type: 'button' }, on: { click: fn } }, icon(ic), h('span', { text: label })));
   }
-  // Carrusel de filtros: toca uno para aplicarlo a la página (o a todas), con vista previa de cada filtro sobre la página actual
+  // Carrusel de filtros: toca uno para aplicarlo a la página (o a todas), con vista previa de cada filtro sobre la página actual.
+  // Todo el cálculo de imagen se hace en un Worker: aquí solo se muestran los resultados.
   let filterAll = false, fbarTick = 0, stageTick = 0;
-  const midCache = new Map();
-  const dropSmall = (id) => { midCache.delete(id); };
-  // versión reducida (≈900 px) de la página sin filtro: sirve para las vistas previas y para responder al instante al tocar un filtro. Se decodifica una sola vez.
-  const smallBase = async (p) => {
-    const bmp = await createImageBitmap(p.orig, { resizeWidth: 1100 });
-    const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
-    return rotateCanvas(await warpQuad(c, p.quad || null, { maxSide: 900 }), p.rot || 0);
+  const fbCache = new Map();
+  const showLive = (p, blob) => {
+    if (!blob || closed || cur() !== p) return;
+    const my = ++liveTick, u = URL.createObjectURL(blob);
+    live.onload = () => {
+      if (my !== liveTick || closed || cur() !== p) { URL.revokeObjectURL(u); return; }
+      live.hidden = false; img.classList.add('under');
+      if (liveUrl) URL.revokeObjectURL(liveUrl);
+      liveUrl = u;
+    };
+    live.src = u;
   };
-  const midOf = async (p) => { if (!midCache.has(p.id)) midCache.set(p.id, await smallBase(p)); return midCache.get(p.id); };
-  const showLive = (p, r) => {
-    if (!r || closed || cur() !== p) return;
-    const my = ++liveTick;
-    live.onload = () => { if (my !== liveTick || closed || cur() !== p) return; live.hidden = false; img.classList.add('under'); };
-    live.src = asSrc(r);
-  };
-  // Muestra el resultado al instante (vista previa) y genera la imagen completa detrás; al terminar todo, se refresca la página
-  function inBackground(p, preview, job) {
+  const setProgress = (i, n) => { prog.hidden = !(n > 1); prog.textContent = n > 1 ? `${i} / ${n}` : ''; };
+  // Muestra el resultado al instante (vista previa) y genera la imagen completa detrás, sin bloquear nada; al terminar todo, se refresca la página.
+  // job(progreso) hace el trabajo; all: el trabajo toca todas las páginas
+  function inBackground(p, preview, job, { all = false } = {}) {
     if (preview) Promise.resolve(preview).then((r) => showLive(p, r)).catch(() => {});
-    stage.classList.add('working');
-    return enqueue(async () => { await job(); p.updatedKey = Date.now(); doc = await getDoc(doc.id); if (pages[0] === p) await commit(); })
-      .then(() => { if (!pendingN) { stage.classList.remove('working'); if (!closed) refresh(); } });
+    return enqueue(async () => {
+      await job(setProgress); setProgress(0, 0);
+      for (const q of all ? pages : [p]) q.updatedKey = Date.now() + Math.random();
+      doc = await getDoc(doc.id); if (all || pages[0] === p) await commit();
+    }, all ? 60000 + pages.length * 30000 : 90000).then(() => { if (!pendingN) { setProgress(0, 0); if (!closed) refresh(); } });
   }
   // antes de exportar, leer el texto, ordenar o borrar, se termina lo que esté pendiente (para no usar una imagen vieja)
   const after = (fn) => async (...a) => { if (pendingN) await withBusy('Terminando los cambios…', () => work); return fn(...a); };
-  const tinyOf = async (p) => scaled(await midOf(p), 160);
   // las operaciones pesadas se hacen de una en una y sin bloquear la pantalla
+  // El círculo de la esquina refleja SIEMPRE cuántas tareas hay pendientes (nada lo pone o quita a mano) y ninguna tarea puede quedarse
+  // esperando para siempre: pasado su tiempo máximo se da por fallida, se avisa y la cola sigue (lo que quedara a medias termina solo detrás).
   let work = Promise.resolve(), pendingN = 0;
-  const enqueue = (fn) => { pendingN++; return (work = work.then(fn).catch((e) => toast(e.message || 'No se pudo completar', 'error')).finally(() => { pendingN--; })); };
-  async function applyFilterTo(id) {
+  const syncSpinner = () => stage.classList.toggle('working', pendingN > 0);
+  const enqueue = (fn, ms = 90000) => {
+    pendingN++; syncSpinner();
+    const guarded = () => new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('Esto tardó demasiado. Inténtalo de nuevo.')), ms);
+      Promise.resolve().then(fn).then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+    });
+    return (work = work.then(guarded).catch((e) => toast(e.message || 'No se pudo completar', 'error')).finally(() => { pendingN--; syncSpinner(); }));
+  };
+  const allPages = async (patch, progress) => { pages = await updateAllPages(doc, patch, { onProgress: progress }); };
+  const specOf = (p, filter) => ({ filter, bright: p.bright || 0, contrast: p.contrast || 0 });
+  function applyFilterTo(id) {
     const p = cur(), all = filterAll && pages.length > 1;
     if ((p.filter || 'auto') === id && !all) return;
-    if (all) {
-      await withBusy('Aplicando a todas las páginas…', async () => { await work; pages = await updateAllPages(doc, { filter: id }); });
-      for (const q of pages) q.updatedKey = Date.now() + Math.random();
-      doc = await getDoc(doc.id); await commit(); refresh(); return;
-    }
-    // una página: se ve el resultado al instante (versión reducida) y la imagen completa se genera detrás, sin bloquear
     fbar.querySelectorAll('.flt').forEach((b, i) => { const on = FILTERS[i].id === id; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
-    inBackground(p, midOf(p).then((mid) => applyFilter(mid, { filter: id, bright: p.bright || 0, contrast: p.contrast || 0 })), () => updatePage(p, { filter: id }));
+    inBackground(p, previewBlobs(p, [specOf(p, id)]).then((a) => a[0]), all ? (pr) => allPages({ filter: id }, pr) : () => updatePage(p, { filter: id }), { all });
   }
+  // Las miniaturas del carrusel se calculan cuando el usuario se detiene en una página (no al pasar rápido por varias) y se guardan por
+  // página: volver a una página ya vista no vuelve a calcular nada.
+  let fbTimer = 0;
   function drawFilterBar() {
     const p = cur(), my = ++fbarTick, now = p.filter || 'auto';
-    fbar.textContent = '';
+    fbar.textContent = ''; clearTimeout(fbTimer);
     if (pages.length > 1) {
       const chk = h('input', { type: 'checkbox', checked: filterAll });
       chk.addEventListener('change', () => { filterAll = chk.checked; });
       fbar.append(h('label', { class: 'all' }, chk, h('span', { text: 'Todas' })));
     }
-    const canv = {};
-    for (const f of FILTERS) {
-      const cv = h('img', { class: 'flt-prev', alt: '', draggable: false }); canv[f.id] = cv;
+    const thumbs = FILTERS.map((f) => {
+      const cv = h('img', { class: 'flt-prev', alt: '', draggable: false });
       fbar.append(h('button', { class: 'flt' + (f.id === now ? ' on' : ''), attrs: { type: 'button', 'aria-pressed': String(f.id === now) }, on: { click: () => applyFilterTo(f.id) } }, cv, h('span', { text: f.label })));
-    }
-    tinyOf(p).then(async (tiny) => {
-      for (const f of FILTERS) {
-        const r = await applyFilter(tiny, { filter: f.id });
-        if (my !== fbarTick || closed) return;
-        canv[f.id].src = asSrc(r, 0.8);
-      }
-    }).catch(() => {});
+      return cv;
+    });
+    const key = [p.id, JSON.stringify(p.quad || null), p.rot || 0].join('|'), hit = fbCache.get(key);
+    if (hit) { hit.forEach((u, i) => { thumbs[i].src = u; }); return; }
+    fbTimer = setTimeout(() => {
+      previewBlobs(p, FILTERS.map((f) => ({ filter: f.id })), { side: 160, quality: 0.8 }).then((blobs) => {
+        if (closed) return;
+        const urls = blobs.map((bl) => URL.createObjectURL(bl));
+        fbCache.set(key, urls);
+        while (fbCache.size > 12) { const k = fbCache.keys().next().value; fbCache.get(k).forEach((u) => URL.revokeObjectURL(u)); fbCache.delete(k); }
+        if (my === fbarTick) urls.forEach((u, i) => { thumbs[i].src = u; });
+      }).catch(() => {});
+    }, 220);
   }
   const refresh = () => { drawStage(); drawStrip(); drawFilterBar(); };
   function go(i) { idx = Math.max(0, Math.min(pages.length - 1, i)); zoomed = false; refresh(); }
@@ -180,8 +194,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
       if (!(await confirmBox({ title: 'Se quitarán las zonas ocultas', text: 'Al volver a recortar, las zonas pixeladas o tapadas se quitan porque ya no coincidirían. Podrás marcarlas de nuevo después.', ok: 'Recortar' }))) return;
       patch.marks = [];
     }
-    dropSmall(p.id);
-    inBackground(p, smallBase({ ...p, ...patch }).then((b) => applyFilter(b, { filter: p.filter || 'auto', bright: p.bright || 0, contrast: p.contrast || 0 })), () => updatePage(p, patch));
+    inBackground(p, previewBlobs({ ...p, ...patch }, [specOf(p, p.filter || 'auto')]).then((a) => a[0]), () => updatePage(p, patch));
   }
   async function doRedact() {
     const p = cur();
@@ -192,8 +205,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   async function doRotate() {
     const p = cur(), shown = !live.hidden ? live : img;
     let preview = null;                                    // lo que ya se ve en pantalla, girado (instantáneo)
-    if (shown.naturalWidth || shown.width) { const k = Math.min(1, 900 / Math.max(shown.naturalWidth || shown.width, shown.naturalHeight || shown.height)); const c = canvasOf((shown.naturalWidth || shown.width) * k, (shown.naturalHeight || shown.height) * k); c.getContext('2d').drawImage(shown, 0, 0, c.width, c.height); preview = rotateCanvas(c, 90); }
-    dropSmall(p.id);
+    if (shown.naturalWidth || shown.width) { const k = Math.min(1, 900 / Math.max(shown.naturalWidth || shown.width, shown.naturalHeight || shown.height)); const c = canvasOf((shown.naturalWidth || shown.width) * k, (shown.naturalHeight || shown.height) * k); c.getContext('2d').drawImage(shown, 0, 0, c.width, c.height); preview = toBlob(rotateCanvas(c, 90), 'image/jpeg', 0.85); }
     inBackground(p, preview, () => rotatePage(p));
   }
   async function doDeletePage() {
@@ -204,49 +216,47 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     pages = left; doc = await getDoc(doc.id); dropUrls('out:' + p.id); dropUrls('th:' + p.id);
     idx = Math.min(idx, pages.length - 1); refresh();
   }
-  async function doFilters(all) {
+  function doFilters(all) {
     const p = cur();
-    const orig = await withBusy('Preparando filtros…', async () => {
-      const o = await blobToCanvas(p.orig);
-      const w = await warpQuad(o, p.quad || null, { maxSide: 1000 });
-      return rotateCanvas(w, p.rot || 0);
-    });
-    const mid = scaled(orig, 900), tiny = scaled(orig, 150);
     let sel = p.filter || 'auto', bright = p.bright || 0, contrast = p.contrast || 0, applyAll = !!all, tick = 0;
     const chips = h('div', { class: 'flt-row', attrs: { 'data-scroll': true } });
-    const chipEls = {};
-    for (const f of FILTERS) {
+    const chipEls = {}, chipUrls = [];
+    const thumbs = FILTERS.map((f) => {
       const cv = h('img', { class: 'flt-prev', alt: '', draggable: false });
       const b = h('button', { class: 'flt' + (f.id === sel ? ' on' : ''), attrs: { type: 'button', 'aria-pressed': String(f.id === sel) }, on: { click: () => { sel = f.id; Object.entries(chipEls).forEach(([id, el]) => { el.classList.toggle('on', id === sel); el.setAttribute('aria-pressed', String(id === sel)); }); preview(); } } }, cv, h('span', { text: f.label }));
       chipEls[f.id] = b; chips.append(b);
-      applyFilter(tiny, { filter: f.id }).then((r) => { cv.src = asSrc(r, 0.8); }).catch(() => {});
-    }
+      return cv;
+    });
+    previewBlobs(p, FILTERS.map((f) => ({ filter: f.id })), { side: 160, quality: 0.8 }).then((blobs) => blobs.forEach((bl, i) => { const u = URL.createObjectURL(bl); chipUrls.push(u); thumbs[i].src = u; })).catch(() => {});
     const sb = h('input', { type: 'range', min: -50, max: 50, step: 1, value: bright, attrs: { 'aria-label': 'Brillo' } });
     const sc = h('input', { type: 'range', min: -50, max: 50, step: 1, value: contrast, attrs: { 'aria-label': 'Contraste' } });
     const allChk = h('input', { type: 'checkbox', checked: applyAll });
     const reset = h('button', { class: 'btn small ghost', attrs: { type: 'button' }, text: 'Restablecer', on: { click: () => { sb.value = 0; sc.value = 0; bright = contrast = 0; preview(); } } });
+    // al arrastrar un deslizador salen decenas de cambios por segundo: solo se calcula el último (una vista previa a la vez)
+    let calculating = false, again = false;
     async function preview() {
-      const my = ++tick;
-      const r = await applyFilter(mid, { filter: sel, bright, contrast });
-      if (my !== tick || closed) return;
-      showLive(cur(), r);
+      if (calculating) { again = true; return; }
+      calculating = true;
+      try {
+        do {
+          again = false; const my = ++tick;
+          const [bl] = await previewBlobs(p, [{ filter: sel, bright, contrast }]);
+          if (my === tick && !closed) showLive(cur(), bl);
+        } while (again && !closed);
+      } catch { /* sin vista previa */ }
+      calculating = false;
     }
     sb.addEventListener('input', () => { bright = +sb.value; preview(); }); sc.addEventListener('input', () => { contrast = +sc.value; preview(); });
     const okBtn = h('button', { class: 'btn primary', attrs: { type: 'button' } }, icon('check', 's'), 'Aplicar');
     const body = h('div', {}, chips, h('label', { class: 'field' }, h('span', { text: 'Brillo' }), sb), h('label', { class: 'field' }, h('span', { text: 'Contraste' }), sc), pages.length > 1 ? h('label', { class: 'check' }, allChk, h('span', { text: 'Aplicar a todas las páginas' })) : null, h('div', { class: 'btn-row' }, reset));
     let applied = false;
     previewing = true;
-    const sheet = openSheet({ title: 'Filtros', body, foot: [okBtn], onClose: () => { previewing = false; if (!applied) { liveTick++; live.hidden = true; img.classList.remove('under'); } deferred.splice(0).forEach(onReady); } });
+    const sheet = openSheet({ title: 'Filtros', body, foot: [okBtn], onClose: () => { previewing = false; chipUrls.forEach((u) => URL.revokeObjectURL(u)); if (!applied) { liveTick++; live.hidden = true; img.classList.remove('under'); } deferred.splice(0).forEach(onReady); } });
     sheet.el.classList.add('flt-sheet');
-    okBtn.addEventListener('click', async () => {
+    okBtn.addEventListener('click', () => {
       applied = true; sheet.close();
-      const patch = { filter: sel, bright, contrast };
-      await withBusy(allChk.checked && pages.length > 1 ? 'Aplicando a todas las páginas…' : 'Aplicando filtro…', async () => {
-        if (allChk.checked && pages.length > 1) { pages = await updateAllPages(doc, patch); }
-        else await updatePage(p, patch);
-      });
-      for (const q of pages) q.updatedKey = Date.now() + Math.random();
-      doc = await getDoc(doc.id); await commit(); refresh();
+      const patch = { filter: sel, bright, contrast }, doAll = allChk.checked && pages.length > 1;
+      inBackground(p, null, doAll ? (pr) => allPages(patch, pr) : () => updatePage(p, patch), { all: doAll });   // la vista previa ya está en pantalla
     });
     preview();
   }
@@ -279,7 +289,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     if (!files.length) return;
     const first = pages.length;
     await withBusy('Importando imágenes…', async () => {
-      const items = files.map((f) => ({ draft: true, make: async () => { const bmp = await createImageBitmap(f); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close(); const big = scaled(c, 3000); return { canvas: big, quad: await detectQuad(big).catch(() => null), draft: true }; } }));
+      const items = files.map((f) => ({ draft: true, make: async () => { const big = await blobToCanvas(f, 3000); return { canvas: big, quad: await detectQuad(big).catch(() => null), draft: true }; } }));
       await appendPages(doc, items);
     });
     await reload(first);

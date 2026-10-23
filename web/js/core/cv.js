@@ -3,41 +3,65 @@
 let engine = null;
 
 // Diagnóstico de velocidad (se muestra en Ajustes): qué motor se está usando y cuánto tarda cada paso
-export const perf = { engine: 'sin cargar', log: [] };
+export const perf = { engine: 'sin cargar', log: [], errors: [] };
+export const logError = (msg) => { perf.errors.unshift(new Date().toLocaleTimeString() + ' ' + String(msg).slice(0, 200)); perf.errors.length = Math.min(perf.errors.length, 15); };
 export function timer(label) {
   const t0 = performance.now(), steps = [];
   return { step(name) { steps.push(name + ' ' + Math.round(performance.now() - t0)); }, end() { perf.log.unshift(`${label}: ${Math.round(performance.now() - t0)} ms (${steps.join(' · ')})`); perf.log.length = Math.min(perf.log.length, 12); } };
 }
 
 // Si Android cierra un motor (p. ej. por falta de memoria) no avisa: su tarea nunca terminaría y todo lo que va detrás
-// quedaría esperando (el círculo de carga no se iría). Cada tarea tiene un tiempo máximo según lo que suele tardar;
-// si se pasa, ese motor se descarta y la tarea se repite en otro.
+// quedaría esperando (el círculo de carga no se iría). Un vigilante comprueba cada segundo que la tarea que está en marcha
+// no pase de su tiempo máximo (según lo que suele tardar); si se pasa, ese motor se descarta y la tarea se repite en otro.
+// El tiempo corre desde que la tarea EMPIEZA (no mientras espera su turno detrás de otras).
 const slowest = {};
-const limitFor = (op, args) => {
-  const px = args.reduce((n, a) => n + (a && a.width ? a.width * a.height : 0), 0) / 1e6;
-  return slowest[op] ? Math.max(4000, slowest[op] * 4, px * 1500) : Math.max(15000, px * 4000);   // la 1.ª vez, margen amplio
-};
+// El vigilante solo debe detectar un motor MUERTO, nunca uno lento: matar uno sano obliga a recargarlo (OpenCV pesa 13 MB) y repetir todo.
+// Por eso los límites son muy holgados (un teléfono lento tarda varios segundos por página; un motor muerto no contesta nunca).
+const limitFor = (op, args) => Math.max(op === 'detect' || op === 'detectBmp' ? 30000 : 60000, (slowest[op] || 0) * 10);
 const retryable = (msg) => Object.assign(new Error(msg), { retry: true });
 
-function workerEngine() {
+function workerEngine(file = './cv-worker.js') {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') return reject(new Error('sin Worker'));
     const tw = performance.now();
-    const w = new Worker(new URL('./cv-worker.js', import.meta.url)); w.__h = null;
+    const w = new Worker(new URL(file, import.meta.url));
     const pending = new Map();
-    let seq = 0, ready = false;
-    const failAll = (err) => { for (const p of pending.values()) p.reject(err); pending.clear(); };
+    let seq = 0, ready = false, running = null, lastMsg = performance.now(), dog = 0;
+    const failAll = (err) => { for (const p of pending.values()) p.reject(err); pending.clear(); running = null; };
+    const h = {
+      dead: false, last: performance.now(), caps: {}, busy: () => pending.size,
+      stop(why = 'motor cerrado') { if (h.dead) return; h.dead = true; clearInterval(dog); w.terminate(); failAll(retryable(why)); },
+      run(op, args, transfer) {
+        return new Promise((res, rej) => {
+          if (h.dead) return rej(retryable('motor cerrado'));
+          h.last = performance.now();
+          const id = ++seq;
+          pending.set(id, { resolve: res, reject: rej, op, t0: performance.now(), limit: limitFor(op, args) });
+          w.postMessage({ id, op, args }, transfer || []);
+        });
+      },
+    };
     w.onmessage = (e) => {
-      const m = e.data;
-      if (m.ready) { ready = true; perf.engine = `Worker (segundo plano) · listo en ${Math.round(performance.now() - tw)} ms` + (m.ms ? ` (leer ${m.ms.leer} · iniciar ${m.ms.iniciar})` : ''); const h = w.__h = { dead: false, last: performance.now(), busy: () => pending.size, stop: (why = 'motor cerrado') => { if (h.dead) return; h.dead = true; w.terminate(); failAll(retryable(why)); }, run: (op, args, transfer) => new Promise((res, rej) => { if (h.dead) return rej(retryable('motor cerrado')); h.last = performance.now(); const id = ++seq; const t = setTimeout(() => { if (pending.has(id)) h.stop('el motor de imagen dejó de responder'); }, limitFor(op, args)); pending.set(id, { resolve: (v) => { clearTimeout(t); res(v); }, reject: (e) => { clearTimeout(t); rej(e); }, op, t0: performance.now() }); w.postMessage({ id, op, args }, transfer || []); }) }; resolve(h); return; }
+      const m = e.data; lastMsg = performance.now();
+      if (m.ready) {
+        ready = true; h.caps = m.caps || {};
+        if (file.includes('gl-worker')) { resolve(h); dog = setInterval(() => { const now = performance.now(); if (running ? now - running.t0 > running.limit : pending.size && now - lastMsg > 8000) h.stop('el motor de la GPU dejó de responder'); }, 1000); return; }
+        perf.engine = `Worker (segundo plano) · listo en ${Math.round(performance.now() - tw)} ms` + (m.ms ? ` (leer ${m.ms.leer} · iniciar ${m.ms.iniciar})` : '') + (h.caps.render ? ' · página completa en el Worker' : ' · página en el hilo principal');
+        dog = setInterval(() => {
+          const now = performance.now();
+          if (running ? now - running.t0 > running.limit : pending.size && now - lastMsg > 8000) h.stop('el motor de imagen dejó de responder');
+        }, 1000);
+        resolve(h); return;
+      }
       if (m.fatal) { w.terminate(); return reject(new Error(m.fatal)); }
+      if (m.started) { const p = pending.get(m.started); if (p) running = { id: m.started, t0: performance.now(), limit: p.limit }; return; }
       const p = pending.get(m.id);
       if (!p) return;
-      pending.delete(m.id);
+      pending.delete(m.id); if (running && running.id === m.id) running = null;
       if (m.ms != null) { slowest[p.op] = Math.max(slowest[p.op] || 0, m.ms); perf.ops = perf.ops || []; perf.ops.unshift(`${p.op}: ${m.ms} ms en el motor · ${Math.round(performance.now() - p.t0)} ms en total`); perf.ops.length = Math.min(perf.ops.length, 20); }
       if (m.error) p.reject(new Error(m.error)); else p.resolve(m.res);
     };
-    w.onerror = (e) => { const err = new Error(e.message || 'error del motor de imagen'); if (!ready) { w.terminate(); reject(err); } else { if (w.__h) w.__h.stop(err.message); else failAll(err); } };
+    w.onerror = (e) => { const err = new Error(e.message || 'error del motor de imagen'); if (!ready) { w.terminate(); reject(err); } else h.stop(err.message); };
   });
 }
 
@@ -53,7 +77,7 @@ function localEngine() {
         if (!m.Mat) await new Promise((r) => { m.onRuntimeInitialized = r; });   // versiones anteriores
         const ops = await import('./cv-ops.js');
         perf.engine = 'Hilo principal (el Worker no arrancó)';
-        resolve({ run: async (op, args) => ops[op](m, ...args) });
+        resolve({ caps: { render: false }, run: async (op, args) => ops[op](m, ...args) });
       } catch (e) { reject(e); }
     };
     s.onerror = () => reject(new Error('No se pudo cargar el motor de imagen. Comprueba tu conexión y vuelve a intentarlo.'));
@@ -82,36 +106,82 @@ let spawning = false, failedSpawn = false;
 setInterval(() => {
   for (let i = extra.length - 1; i >= 0; i--) { const w = extra[i]; if (w.dead || (w.busy() === 0 && performance.now() - w.last > 45000)) { w.stop(); extra.splice(i, 1); perf.lanes = 1 + extra.length; } }
 }, 15000);
-function pick(first) {
+// Cada página vuelve al mismo motor (allí está su recorte en memoria: cambiar de filtro no repite el trabajo)
+const affinity = new Map();
+function pick(first, hint) {
   if (!first.busy) return first;                                   // motor en el hilo principal: sin grupo
   const all = [first, ...extra].filter((w) => !w.dead);
   if (!all.length) return first;
+  if (hint != null) { const a = affinity.get(hint); if (a && !a.dead) return a; }
   const best = all.reduce((a, b) => (b.busy() < a.busy() ? b : a));
   if (best.busy() > 0 && all.length < cvLanes() && !spawning && !failedSpawn) {
     spawning = true;
     workerEngine().then((w) => { extra.push(w); perf.lanes = 1 + extra.length; }).catch(() => { failedSpawn = true; }).finally(() => { spawning = false; });
   }
+  if (hint != null) { affinity.set(hint, best); if (affinity.size > 200) affinity.delete(affinity.keys().next().value); }
   return best;
 }
 
-// Ejecuta una operación de cv-ops.js con imágenes { data, width, height }.
+// ---- GPU ----
+// Las páginas (recorte, filtros, giro, vistas previas) se hacen en la GPU con WebGL2 dentro de su propio Worker: arranca en
+// milisegundos (no carga OpenCV) y procesa millones de píxeles a la vez. Si el teléfono no lo soporta o falla, se usa OpenCV.
+const GPU_OPS = new Set(['render', 'rotate90', 'preview']);
+let glP = null, glFails = 0, glOff = false;
+export function loadGL() {
+  if (glOff) return Promise.resolve(null);
+  if (!glP) {
+    let mode = 'auto';   // auto: con prueba de velocidad · force/off: para pruebas (?gpu=force o localStorage wilscan-gpu)
+    try { const m = new URLSearchParams(location.search).get('gpu') || localStorage.getItem('wilscan-gpu'); if (m === 'force' || m === 'off') mode = m; } catch { /* sin almacenamiento */ }
+    glP = workerEngine('./gl-worker.js?gpu=' + mode).then((h) => {
+      const g = h.caps.gpu || {};
+      if (!h.caps.render) { perf.gpu = 'GPU no disponible' + (g.error ? ': ' + g.error : ''); h.stop(); glOff = true; return null; }
+      perf.gpu = 'GPU (WebGL2): ' + g.renderer + (g.benchmarkMs != null ? ` · prueba: ${g.benchmarkMs} ms` : '');
+      return h;
+    }).catch((e) => { perf.gpu = 'GPU no disponible: ' + e.message; glOff = true; return null; });
+  }
+  return glP;
+}
+
+// Ejecuta una operación del Worker (cv-ops.js / render-ops.js / gl-ops.js). opts: { transfer: objetos que se pasan sin copiar, affinity: clave para volver al mismo motor, retry: false si los argumentos ya no se pueden reenviar }
 let lastUse = 0;
 export const cvIdleFor = (ms) => performance.now() - lastUse > ms;
 
-// Las imágenes se copian al motor (no se transfieren) para poder repetir la tarea si ese motor se cae.
-export async function cvRun(op, args) {
+export async function cvRun(op, args, { transfer, affinity: hint, retry = true, cpu = false } = {}) {   // cpu: fuerza el motor de OpenCV (pruebas)
+  if (GPU_OPS.has(op) && !glOff && !cpu) {
+    const g = await loadGL();
+    if (g && !g.dead) {
+      try { const r = await g.run(op, args, transfer); glFails = 0; return r; }
+      catch (e) {
+        if (e.retry) glP = null;                                    // el motor de la GPU se cerró: se vuelve a abrir en la siguiente
+        else if (++glFails >= 3) glOff = true;                      // falla una y otra vez: se deja la GPU y se sigue con OpenCV
+        perf.gpuFallos = (perf.gpuFallos || 0) + 1; perf.gpuError = e.message;
+        if (transfer && transfer.length) throw e;                   // lo enviado sin copia ya no existe: lo repite quien llamó con la foto original
+      }
+    } else if (g && g.dead) glP = null;
+  }
   for (let attempt = 0; ; attempt++) {
     lastUse = performance.now();
     await loadCV();
     const eng = await engine;
     if (eng.dead && !extra.some((w) => !w.dead)) { engine = null; continue; }     // el motor principal se cayó: se abre otro
-    try { return await pick(eng).run(op, args); }
+    try { return await pick(eng, hint).run(op, args, transfer); }
     catch (e) {
-      if (!e.retry || attempt >= 2) throw e;
+      if (!e.retry || !retry || attempt >= 2) throw e;
       perf.restarts = (perf.restarts || 0) + 1;
       if (eng.dead) engine = null;
     } finally { lastUse = performance.now(); }
   }
+}
+
+// ¿Se pueden procesar páginas completas en un Worker (GPU u OpenCV)? Si no, se hace en el hilo principal como antes.
+let renderBroken = false;
+export const disableRender = () => { renderBroken = true; };
+export async function canRender() {
+  if (renderBroken) return false;
+  try {
+    const g = await loadGL(); if (g && !g.dead) return true;
+    await loadCV(); const e = await engine; return !!(e.caps && e.caps.render);
+  } catch { return false; }
 }
 
 export const imageOf = (canvas) => canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);

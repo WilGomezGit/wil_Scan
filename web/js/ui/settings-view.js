@@ -5,9 +5,9 @@ import { FILTERS } from '../core/filters.js';
 import { LANGS } from '../core/ocr.js';
 import { usage, wipeAll, persist } from '../core/db.js';
 import { isNative } from '../core/share.js';
-import { perf, loadCV } from '../core/cv.js';
+import { perf, loadCV, cvLanes } from '../core/cv.js';
 
-export const APP_VERSION = '1.0.2';
+export const APP_VERSION = '1.0.4';
 let installEvent = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; const b = $('#btnInstall'); if (b) b.hidden = false; });
 window.addEventListener('appinstalled', () => { installEvent = null; const b = $('#btnInstall'); if (b) b.hidden = true; toast('WilScan instalada', 'ok'); });
@@ -29,7 +29,22 @@ export function initSettings() {
   const storage = h('p', { class: 'hint', text: 'Calculando…' });
   const swState = h('p', { class: 'hint', text: '' });
   const diag = h('div', { class: 'hint' });
-  const drawDiag = () => { diag.textContent = ''; diag.append(h('p', { class: 'tight', text: 'Motor de imagen: ' + perf.engine }), ...(perf.log.length ? perf.log.map((l) => h('p', { class: 'tight', text: l })) : [h('p', { class: 'tight', text: 'Aún no hay medidas: gira o filtra una página y pulsa Actualizar.' })])); };
+  const drawDiag = () => {
+    const lines = [...perf.log, ...(perf.ops || []).slice(0, 6)];
+    diag.textContent = '';
+    diag.append(h('p', { class: 'tight', text: (perf.gpu || 'GPU: sin iniciar') + (perf.gpuFallos ? ` · caídas a OpenCV: ${perf.gpuFallos}` : '') }), h('p', { class: 'tight', text: 'Motor de bordes (OpenCV): ' + perf.engine + (perf.restarts ? ` · reinicios: ${perf.restarts}` : '') }),
+      ...(lines.length ? lines.map((l) => h('p', { class: 'tight', text: l })) : [h('p', { class: 'tight', text: 'Aún no hay medidas: gira o filtra una página y pulsa Actualizar.' })]));
+  };
+  // Informe para pegar en un mensaje: el motor que se usa, cuánto tarda cada tarea, errores recientes y datos del teléfono
+  const report = () => [
+    `WilScan ${APP_VERSION} · ${new Date().toLocaleString()}`,
+    `Teléfono: ${navigator.userAgent}`,
+    `Núcleos: ${navigator.hardwareConcurrency || '?'} · Memoria: ${navigator.deviceMemory || '?'} GB · Pantalla: ${screen.width}x${screen.height} @${window.devicePixelRatio} · Motores en paralelo: ${cvLanes()}`,
+    perf.gpu || 'GPU: sin iniciar', 'OpenCV: ' + perf.engine, `Reinicios de motor: ${perf.restarts || 0} · caídas de GPU a OpenCV: ${perf.gpuFallos || 0}${perf.gpuError ? ' (' + perf.gpuError + ')' : ''}`,
+    '', 'Últimas tareas:', ...(perf.log || []), ...(perf.ops || []), '', 'Errores recientes:', ...(perf.errors.length ? perf.errors : ['(ninguno)']),
+    '', 'Ajustes: ' + JSON.stringify(getSettings()),
+  ].join('\n');
+  const copyReport = async () => { drawDiag(); const t = report(); try { await navigator.clipboard.writeText(t); toast('Informe copiado: pégalo en un mensaje', 'ok'); } catch { const a = h('textarea', { value: t, attrs: { 'aria-label': 'Informe' } }); a.style.cssText = 'width:100%;height:140px'; diag.append(a); a.select(); toast('Copia el informe de la caja', 'info'); } };
   drawDiag(); document.addEventListener('click', (e) => { if (e.target.closest('[data-tab="settings"]')) setTimeout(drawDiag, 50); });
   root.append(
     h('div', { class: 'view-head' }, h('h1', { text: 'Ajustes' })),
@@ -48,7 +63,7 @@ export function initSettings() {
           swState, h('div', { class: 'label', text: 'Almacenamiento' }), storage,
           h('div', { class: 'btn-row set-actions' }, h('button', { class: 'btn danger', attrs: { type: 'button' }, on: { click: async () => { if (await confirmBox({ title: '¿Borrar todos los datos?', text: 'Se eliminarán todos los documentos, la firma y los ajustes de este dispositivo. No se puede deshacer.', ok: 'Borrar todo', danger: true })) { await wipeAll(); toast('Datos borrados', 'ok'); setTimeout(() => location.reload(), 700); } } } }, icon('trash', 's'), 'Borrar todos los datos'))),
         h('div', { class: 'section-title', text: 'Diagnóstico de velocidad' }),
-        h('div', { class: 'card pad' }, diag, h('div', { class: 'btn-row' }, h('button', { class: 'btn small', attrs: { type: 'button' }, on: { click: () => { loadCV().catch(() => {}).then(drawDiag); } } }, 'Actualizar'))),
+        h('div', { class: 'card pad' }, diag, h('div', { class: 'btn-row' }, h('button', { class: 'btn small', attrs: { type: 'button' }, on: { click: () => { loadCV().catch(() => {}).then(drawDiag); } } }, 'Actualizar'), h('button', { class: 'btn small', attrs: { type: 'button' }, on: { click: copyReport } }, icon('copy', 's'), 'Copiar informe'))),
         h('div', { class: 'section-title', text: 'Acerca de' }),
         h('div', { class: 'card pad about' },
           h('div', { class: 'about-head' }, h('img', { src: new URL('../../assets/logo.svg', import.meta.url).href, alt: 'WG', width: 44, height: 44 }), h('div', {}, h('b', { text: 'WilScan' }), h('small', { text: ` versión ${APP_VERSION}` }), h('p', { class: 'hint tight', text: 'Una creación de WG — Wilmar Gómez' }))),

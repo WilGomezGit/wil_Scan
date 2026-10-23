@@ -25,23 +25,4 @@ export async function warpQuad(src, quad, { maxSide = 2200 } = {}) {
   return canvasFrom(await cvRun('warp', [imageOf(crop), local, W, H]));
 }
 
-// Giro fino (ángulos pequeños) manteniendo el tamaño; el relleno de las esquinas toma el color medio del borde
-export function rotateBy(c, deg) {
-  if (!deg) return c;
-  const out = canvasOf(c.width, c.height), x = out.getContext('2d'), s = c.getContext('2d', { willReadFrequently: true });
-  const px = [[2, 2], [c.width - 3, 2], [2, c.height - 3], [c.width - 3, c.height - 3]].map(([a, b]) => s.getImageData(a, b, 1, 1).data);
-  const avg = [0, 1, 2].map((i) => Math.round(px.reduce((t, p) => t + p[i], 0) / 4));
-  x.fillStyle = `rgb(${avg[0]},${avg[1]},${avg[2]})`; x.fillRect(0, 0, out.width, out.height);
-  x.translate(out.width / 2, out.height / 2); x.rotate((deg * Math.PI) / 180); x.imageSmoothingQuality = 'high'; x.drawImage(c, -c.width / 2, -c.height / 2);
-  return out;
-}
-
-export function rotateCanvas(c, deg) {
-  const r = ((deg % 360) + 360) % 360;
-  if (!r) return c;
-  const swap = r === 90 || r === 270;
-  const out = canvasOf(swap ? c.height : c.width, swap ? c.width : c.height);
-  const x = out.getContext('2d');
-  x.translate(out.width / 2, out.height / 2); x.rotate((r * Math.PI) / 180); x.drawImage(c, -c.width / 2, -c.height / 2);
-  return out;
-}
+export { rotateBy, rotateCanvas } from './canvas-ops.js';

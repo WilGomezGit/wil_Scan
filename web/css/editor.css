@@ -84,3 +84,7 @@ body:has(.flt-sheet) .backdrop .sheet { pointer-events: auto; }
 .red-rect.wht { fill: rgba(255, 255, 255, .78); stroke: #00f0ff; }
 .red-x circle { fill: #ff3b6b; stroke: #fff; stroke-width: 2; }
 .red-x path { fill: none; stroke: #fff; stroke-width: 2.5; stroke-linecap: round; }
+
+/* contador al aplicar un cambio a varias páginas (sin pantalla de espera) */
+.ed-prog { position: absolute; right: 40px; top: 12px; padding: 3px 9px; border-radius: 999px; background: rgba(8, 9, 18, .78); font-size: 12px; font-weight: 700; color: #fff; pointer-events: none; z-index: 2; }
+.ed-stage.working::after { z-index: 2; }

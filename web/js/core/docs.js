@@ -1,10 +1,9 @@
 // Operaciones de alto nivel sobre documentos (crear, páginas, OCR, PDF, unir, importar PDF).
 import { uid, saveDoc, getDoc, deleteDoc, savePage, getPage, getPages, deletePage, patchDoc, patchPage } from './db.js';
-import { newPage, rerender, toBlob, blobToCanvas, dropPre } from './pages.js';
-import { rotateCanvas } from './warp.js';
+import { newPage, rerender, toBlob, blobToCanvas, dropPre, rotateBlobs, prepareOcr } from './pages.js';
 import { timer, cvIdleFor, cvLanes } from './cv.js';
 import { limiter, mapLimit } from './pool.js';
-import { recognize } from './ocr.js';
+import { recognize, recognizeImage } from './ocr.js';
 import { buildPdf } from './pdf-export.js';
 import { openForRender, renderPdfPage } from './pdf-tools.js';
 import { canvasOf } from './cv.js';
@@ -47,6 +46,15 @@ export async function ensureFull(page) {
   return page;
 }
 
+// Lee el texto de una página. La preparación de la imagen (reducir y pasar a blanco y negro) se hace en el Worker; si no se puede, aquí.
+async function readPage(page, lang, onProgress) {
+  const prep = await prepareOcr(page).catch(() => null);
+  if (prep) { const r = await recognizeImage(prep.blob, { k: prep.k, lang, onProgress, pixels: prep.pixels }); return { ...r, w: page.w, h: page.h }; }
+  const canvas = await blobToCanvas(page.out);
+  const r = await recognize(canvas, { lang, onProgress });
+  return { ...r, w: canvas.width, h: canvas.height };
+}
+
 // ---- OCR en segundo plano ----
 // Con «PDF buscable» activado, el texto de las páginas se reconoce sin esperar a que se pida: así exportar es casi inmediato.
 // Va de una página en una, cede el paso a cualquier OCR que pida el usuario y espera a que el motor de imagen esté libre.
@@ -68,11 +76,10 @@ async function pumpOcr() {
       if (!p || p.draft || (p.words && p.textLang === lang)) continue;   // los borradores se reconocen cuando tengan la imagen completa
       bgCurrent = id;
       bgJob = (async () => {
-        const rev = p.rev, canvas = await blobToCanvas(p.out);
-        const r = await recognize(canvas, { lang });
+        const rev = p.rev, r = await readPage(p, lang);
         const cur = await getPage(id);
         if (!cur || cur.rev !== rev) return;                          // la página cambió mientras tanto: ese texto ya no vale
-        Object.assign(cur, { text: r.text, textLang: lang, words: r.words, w: canvas.width, h: canvas.height });
+        Object.assign(cur, { text: r.text, textLang: lang, words: r.words, w: r.w, h: r.h });
         await savePage(cur);
       })();
       try { await bgJob; } catch { /* se reintentará cuando se pida */ }
@@ -145,8 +152,8 @@ export async function updatePage(page, patch) {
 // Girar 90° sin repetir todo el proceso: se gira la imagen ya generada y su miniatura (de décimas de segundo, no de segundos)
 export async function rotatePage(page) {
   const t = timer('Girar');
-  const out = rotateCanvas(await blobToCanvas(page.out), 90), thumb = rotateCanvas(await blobToCanvas(page.thumb), 90); t.step('girar');
-  Object.assign(page, { rot: ((page.rot || 0) + 90) % 360, out: await toBlob(out, 'image/jpeg', Math.max(quality(), 0.92)), thumb: await toBlob(thumb, 'image/jpeg', 0.75), w: out.width, h: out.height, text: null, textLang: null, words: null });
+  const r = await rotateBlobs(page, Math.max(quality(), 0.92)); t.step('girar');
+  Object.assign(page, { rot: ((page.rot || 0) + 90) % 360, out: r.out, thumb: r.thumb, w: r.w, h: r.h, text: null, textLang: null, words: null });
   // las zonas ocultas giran con la página: (x, y) → (1 − y − alto, x)
   if (page.marks && page.marks.length) page.marks = page.marks.map((m) => ({ ...m, x: 1 - m.y - m.h, y: m.x, w: m.h, h: m.w }));
   dropPre(page.id); page.rev = Date.now() + Math.random();
@@ -155,9 +162,10 @@ export async function rotatePage(page) {
   return page;
 }
 
-export async function updateAllPages(doc, patch) {
+export async function updateAllPages(doc, patch, { onProgress } = {}) {
   const pages = await docPages(doc);
-  await mapLimit(pages, cvLanes(), (p) => updatePage(p, patch));   // en paralelo si hay núcleos de sobra
+  let done = 0;
+  await mapLimit(pages, cvLanes(), async (p) => { await updatePage(p, patch); if (onProgress) onProgress(++done, pages.length); });   // en paralelo si hay núcleos de sobra
   await persistDoc(doc, pages);
   return pages;
 }
@@ -179,9 +187,8 @@ export async function ocrPage(page, { lang = getSettings().ocrLang, onProgress, 
     // ¿ya lo reconoció el OCR en segundo plano? (misma versión de la imagen)
     const saved = await getPage(page.id);
     if (!force && saved && saved.rev === page.rev && saved.words && saved.textLang === lang) { Object.assign(page, { text: saved.text, textLang: lang, words: saved.words, w: saved.w, h: saved.h }); return page.text; }
-    const canvas = await blobToCanvas(page.out);
-    const r = await recognize(canvas, { lang, onProgress });
-    page.text = r.text; page.textLang = lang; page.words = r.words; page.w = canvas.width; page.h = canvas.height;
+    const r = await readPage(page, lang, onProgress);
+    page.text = r.text; page.textLang = lang; page.words = r.words; page.w = r.w; page.h = r.h;
     await savePage(page);
     return page.text;
   } finally { fg--; }

@@ -133,14 +133,17 @@ export function promptBox({ title, label = '', value = '', ok = 'Guardar', place
 }
 
 // Pantalla de progreso que bloquea la interfaz: const b = busy('Procesando…'); b.update('texto', 0.4); b.close();
-export function busy(text = 'Procesando…') {
+// Si tarda más de 'patience' ms aparece un botón para seguir usando la app mientras termina en segundo plano: el usuario nunca queda atrapado.
+export function busy(text = 'Procesando…', { patience = 25000 } = {}) {
   const fill = h('i'), msg = h('p', { text }), bar = h('div', { class: 'bar' }, fill);
   bar.hidden = true;
-  const el = h('div', { class: 'busy', attrs: { role: 'alert', 'aria-live': 'polite' } }, h('div', { class: 'busy-box' }, h('div', { class: 'spin' }), msg, bar));
+  const later = h('button', { class: 'btn small ghost', hidden: true, attrs: { type: 'button' }, text: 'Seguir en segundo plano', on: { click: () => el.remove() } });
+  const el = h('div', { class: 'busy', attrs: { role: 'alert', 'aria-live': 'polite' } }, h('div', { class: 'busy-box' }, h('div', { class: 'spin' }), msg, bar, later));
   document.body.append(el);
+  const t = setTimeout(() => { later.hidden = false; }, patience);
   return {
     update(t, pct) { if (t != null) msg.textContent = t; if (pct != null) { bar.hidden = false; fill.style.width = Math.round(Math.max(0, Math.min(1, pct)) * 100) + '%'; } },
-    close() { el.remove(); },
+    close() { clearTimeout(t); el.remove(); },
   };
 }
 

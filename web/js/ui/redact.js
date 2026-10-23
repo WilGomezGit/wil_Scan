@@ -29,7 +29,7 @@ export function openRedact(page) {
     cancelBtn.addEventListener('click', () => pop());
     paintTypes();
 
-    const src = scaled(await blobToCanvas(page.out), 1600);
+    const src = await blobToCanvas(page.out, 1600);
     dims = { w: src.width, h: src.height };
     img.src = src.toDataURL('image/jpeg', 0.85);
 
