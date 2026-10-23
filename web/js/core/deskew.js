@@ -1,6 +1,6 @@
 // Enderezar por la inclinación del texto (para fotos torcidas en las que no se ven los bordes del papel).
 // Busca el ángulo en el que las líneas de texto quedan más "apretadas" en filas (perfil de proyección).
-import { canvasOf } from './cv.js';
+import { mk as canvasOf } from './canvas-ops.js';   // funciona en la página y en el Worker
 
 // Devuelve la inclinación del texto en grados (positivo = girado a la derecha), o 0 si no hay una inclinación clara.
 export function estimateSkew(source, { range = 15 } = {}) {

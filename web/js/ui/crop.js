@@ -35,7 +35,7 @@ export function openCropper(page, opts = {}) {
     const pop = pushLayer(() => finish(result));
     cancelBtn.addEventListener('click', () => pop());
 
-    const src = scaled(page.canvas || await blobToCanvas(page.orig), 1600);
+    const src = page.canvas ? scaled(page.canvas, 1600) : await blobToCanvas(page.orig, 1600);
     dims = { w: src.width, h: src.height };
     img.src = src.toDataURL('image/jpeg', 0.85);
     if (!q) { try { q = await detectQuad(src, { maxSide: 520 }); } catch { q = null; } if (!q) q = full(); }

@@ -4,7 +4,7 @@ import { Camera } from '../core/camera.js';
 import { detectQuad } from '../core/detect.js';
 import { loadCV, canvasOf } from '../core/cv.js';
 import { warpQuad } from '../core/warp.js';
-import { scaled } from '../core/pages.js';
+import { scaled, blobToCanvas } from '../core/pages.js';
 import { composeIdSheet, startPage, recropPage } from '../core/docs.js';
 import { uid } from '../core/db.js';
 import { openCropper } from './crop.js';
@@ -145,10 +145,12 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
     ovPoly.setAttribute('points', pts.map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' '));
     pts.forEach(([px, py], i) => { ovDots[i].setAttribute('cx', px.toFixed(1)); ovDots[i].setAttribute('cy', py.toFixed(1)); });
   }
+  let pace = 160;                                    // pausa entre detecciones: se alarga sola si cada una tarda (el teléfono va justo o el motor está ocupado procesando páginas)
   async function loop() {
     if (!running) return;
     if (!detecting && !shooting && video.videoWidth && document.visibilityState === 'visible') {
       detecting = true;
+      const t0 = performance.now();
       try {
         const q = await detectQuad(video, { maxSide: 420 });
         quad = q;
@@ -163,8 +165,9 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
       } catch (e) { quad = null; }
       detecting = false;
       paint();
+      pace = Math.min(700, Math.max(160, Math.round(pace * 0.5 + (performance.now() - t0) * 1.5)));   // la detección ocupa como mucho ~40 % del tiempo
     }
-    setTimeout(loop, 160);
+    setTimeout(loop, pace);
   }
 
   // ---- capturar / importar ----
@@ -205,9 +208,7 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
     shooting = true;
     for (const f of list) {
       try {
-        const bmp = await createImageBitmap(f);
-        const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
-        await addCanvas(c);
+        await addCanvas(await blobToCanvas(f, MAX));
       } catch { toast(`No se pudo abrir «${f.name}».`, 'error'); }
     }
     shooting = false; galleryIn.value = '';

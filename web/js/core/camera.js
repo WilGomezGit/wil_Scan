@@ -1,5 +1,6 @@
 // Cámara del dispositivo: abrir, cambiar entre trasera y frontal, linterna y captura a máxima resolución.
 import { canvasOf } from './cv.js';
+import { blobToCanvas } from './pages.js';
 
 export class Camera {
   constructor(video) { this.video = video; this.stream = null; this.track = null; this.facing = 'environment'; this.torchOn = false; }
@@ -44,9 +45,7 @@ export class Camera {
       try {
         const ic = new ImageCapture(this.track);
         const blob = await Promise.race([ic.takePhoto(), new Promise((_, rej) => setTimeout(() => rej(new Error('tiempo')), 3500))]);
-        const bmp = await createImageBitmap(blob);
-        const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0);
-        if (bmp.close) bmp.close();
+        const c = await blobToCanvas(blob, 3000);                       // se decodifica ya reducida: no se carga la foto de 12 MP entera en memoria
         if (Math.min(c.width, c.height) >= Math.min(this.video.videoWidth, this.video.videoHeight)) return c;
       } catch { /* se usa el fotograma */ }
     }

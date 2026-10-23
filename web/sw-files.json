@@ -1,5 +1,5 @@
 {
- "version": "fe92f02bed",
+ "version": "8bdd66895b",
  "shell": [
   "./",
   "assets/icon-192.png",
@@ -17,6 +17,7 @@
   "css/tools.css",
   "index.html",
   "js/core/camera.js",
+  "js/core/canvas-ops.js",
   "js/core/cv-ops.js",
   "js/core/cv-worker.js",
   "js/core/cv.js",
@@ -31,6 +32,7 @@
   "js/core/pdf-tools.js",
   "js/core/pool.js",
   "js/core/qr.js",
+  "js/core/render-ops.js",
   "js/core/share.js",
   "js/core/warp.js",
   "js/lib/dom.js",

@@ -10,7 +10,7 @@ import { openEditor } from './ui/editor.js';
 import { newDoc, importPdf } from './core/docs.js';
 import { detectQuad } from './core/detect.js';
 import { canvasOf, loadCV, timer } from './core/cv.js';
-import { scaled } from './core/pages.js';
+import { scaled, blobToCanvas } from './core/pages.js';
 import { isNative } from './core/share.js';
 
 let view = 'docs';
@@ -45,8 +45,7 @@ async function importFiles(files) {
       let done = 0;
       const items = imgs.map((file) => ({ draft: true, make: async () => {
         const t = timer('Importar');
-        const bmp = await createImageBitmap(file); t.step('decodificar'); const c = canvasOf(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, 0, 0); if (bmp.close) bmp.close();
-        const big = scaled(c, 3000); t.step('reducir');
+        const big = await blobToCanvas(file, 3000); t.step('decodificar');   // ya reducida al decodificar
         const quad = await detectQuad(big).catch(() => null); t.step('bordes'); t.end();
         b.update(`Imagen ${++done} de ${imgs.length}`, done / imgs.length);
         return { canvas: big, quad, draft: true };

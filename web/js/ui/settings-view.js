@@ -7,7 +7,7 @@ import { usage, wipeAll, persist } from '../core/db.js';
 import { isNative } from '../core/share.js';
 import { perf, loadCV } from '../core/cv.js';
 
-export const APP_VERSION = '1.0.2';
+export const APP_VERSION = '1.0.3';
 let installEvent = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; const b = $('#btnInstall'); if (b) b.hidden = false; });
 window.addEventListener('appinstalled', () => { installEvent = null; const b = $('#btnInstall'); if (b) b.hidden = true; toast('WilScan instalada', 'ok'); });
@@ -29,7 +29,12 @@ export function initSettings() {
   const storage = h('p', { class: 'hint', text: 'Calculando…' });
   const swState = h('p', { class: 'hint', text: '' });
   const diag = h('div', { class: 'hint' });
-  const drawDiag = () => { diag.textContent = ''; diag.append(h('p', { class: 'tight', text: 'Motor de imagen: ' + perf.engine }), ...(perf.log.length ? perf.log.map((l) => h('p', { class: 'tight', text: l })) : [h('p', { class: 'tight', text: 'Aún no hay medidas: gira o filtra una página y pulsa Actualizar.' })])); };
+  const drawDiag = () => {
+    const lines = [...perf.log, ...(perf.ops || []).slice(0, 6)];
+    diag.textContent = '';
+    diag.append(h('p', { class: 'tight', text: 'Motor de imagen: ' + perf.engine + (perf.restarts ? ` · reinicios: ${perf.restarts}` : '') }),
+      ...(lines.length ? lines.map((l) => h('p', { class: 'tight', text: l })) : [h('p', { class: 'tight', text: 'Aún no hay medidas: gira o filtra una página y pulsa Actualizar.' })]));
+  };
   drawDiag(); document.addEventListener('click', (e) => { if (e.target.closest('[data-tab="settings"]')) setTimeout(drawDiag, 50); });
   root.append(
     h('div', { class: 'view-head' }, h('h1', { text: 'Ajustes' })),
