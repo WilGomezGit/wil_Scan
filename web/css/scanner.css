@@ -57,3 +57,6 @@
 .scan-quad { fill: rgba(0, 240, 255, .18); stroke: #00f0ff; stroke-width: 4; stroke-linejoin: round; }
 .scan-dot { fill: #fff; }
 .scan-overlay.ok .scan-quad { fill: rgba(31, 224, 138, .22); stroke: #1fe08a; }
+
+.scan-th.bad { border-color: #ff3b6b; }
+.scan-th.bad .st { background: #ff3b6b; color: #fff; }

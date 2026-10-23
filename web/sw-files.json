@@ -1,5 +1,5 @@
 {
- "version": "8bdd66895b",
+ "version": "9fe8623b12",
  "shell": [
   "./",
   "assets/icon-192.png",
@@ -26,6 +26,8 @@
   "js/core/detect.js",
   "js/core/docs.js",
   "js/core/filters.js",
+  "js/core/gl-ops.js",
+  "js/core/gl-worker.js",
   "js/core/ocr.js",
   "js/core/pages.js",
   "js/core/pdf-export.js",

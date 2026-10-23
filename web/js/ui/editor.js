@@ -57,7 +57,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   };
   window.addEventListener('wilscan:page', onReady);
   finishLater(pages);
-  const pop = pushLayer(() => { closed = true; window.removeEventListener('wilscan:page', onReady); root.remove(); dropUrls(); if (liveUrl) URL.revokeObjectURL(liveUrl); fbUrls.splice(0).forEach((u) => URL.revokeObjectURL(u)); onClose(); });
+  const pop = pushLayer(() => { closed = true; window.removeEventListener('wilscan:page', onReady); root.remove(); dropUrls(); if (liveUrl) URL.revokeObjectURL(liveUrl); for (const urls of fbCache.values()) urls.forEach((u) => URL.revokeObjectURL(u)); fbCache.clear(); clearTimeout(fbTimer); onClose(); });
   backBtn.addEventListener('click', () => pop());
 
   // ---------- pintar ----------
@@ -96,7 +96,7 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   // Carrusel de filtros: toca uno para aplicarlo a la página (o a todas), con vista previa de cada filtro sobre la página actual.
   // Todo el cálculo de imagen se hace en un Worker: aquí solo se muestran los resultados.
   let filterAll = false, fbarTick = 0, stageTick = 0;
-  const fbUrls = [];
+  const fbCache = new Map();
   const showLive = (p, blob) => {
     if (!blob || closed || cur() !== p) return;
     const my = ++liveTick, u = URL.createObjectURL(blob);
@@ -113,18 +113,27 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
   // job(progreso) hace el trabajo; all: el trabajo toca todas las páginas
   function inBackground(p, preview, job, { all = false } = {}) {
     if (preview) Promise.resolve(preview).then((r) => showLive(p, r)).catch(() => {});
-    stage.classList.add('working');
     return enqueue(async () => {
       await job(setProgress); setProgress(0, 0);
       for (const q of all ? pages : [p]) q.updatedKey = Date.now() + Math.random();
       doc = await getDoc(doc.id); if (all || pages[0] === p) await commit();
-    }).then(() => { if (!pendingN) { stage.classList.remove('working'); setProgress(0, 0); if (!closed) refresh(); } });
+    }, all ? 60000 + pages.length * 30000 : 90000).then(() => { if (!pendingN) { setProgress(0, 0); if (!closed) refresh(); } });
   }
   // antes de exportar, leer el texto, ordenar o borrar, se termina lo que esté pendiente (para no usar una imagen vieja)
   const after = (fn) => async (...a) => { if (pendingN) await withBusy('Terminando los cambios…', () => work); return fn(...a); };
   // las operaciones pesadas se hacen de una en una y sin bloquear la pantalla
+  // El círculo de la esquina refleja SIEMPRE cuántas tareas hay pendientes (nada lo pone o quita a mano) y ninguna tarea puede quedarse
+  // esperando para siempre: pasado su tiempo máximo se da por fallida, se avisa y la cola sigue (lo que quedara a medias termina solo detrás).
   let work = Promise.resolve(), pendingN = 0;
-  const enqueue = (fn) => { pendingN++; return (work = work.then(fn).catch((e) => toast(e.message || 'No se pudo completar', 'error')).finally(() => { pendingN--; })); };
+  const syncSpinner = () => stage.classList.toggle('working', pendingN > 0);
+  const enqueue = (fn, ms = 90000) => {
+    pendingN++; syncSpinner();
+    const guarded = () => new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('Esto tardó demasiado. Inténtalo de nuevo.')), ms);
+      Promise.resolve().then(fn).then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+    });
+    return (work = work.then(guarded).catch((e) => toast(e.message || 'No se pudo completar', 'error')).finally(() => { pendingN--; syncSpinner(); }));
+  };
   const allPages = async (patch, progress) => { pages = await updateAllPages(doc, patch, { onProgress: progress }); };
   const specOf = (p, filter) => ({ filter, bright: p.bright || 0, contrast: p.contrast || 0 });
   function applyFilterTo(id) {
@@ -133,9 +142,12 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
     fbar.querySelectorAll('.flt').forEach((b, i) => { const on = FILTERS[i].id === id; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
     inBackground(p, previewBlobs(p, [specOf(p, id)]).then((a) => a[0]), all ? (pr) => allPages({ filter: id }, pr) : () => updatePage(p, { filter: id }), { all });
   }
+  // Las miniaturas del carrusel se calculan cuando el usuario se detiene en una página (no al pasar rápido por varias) y se guardan por
+  // página: volver a una página ya vista no vuelve a calcular nada.
+  let fbTimer = 0;
   function drawFilterBar() {
     const p = cur(), my = ++fbarTick, now = p.filter || 'auto';
-    fbar.textContent = ''; fbUrls.splice(0).forEach((u) => URL.revokeObjectURL(u));
+    fbar.textContent = ''; clearTimeout(fbTimer);
     if (pages.length > 1) {
       const chk = h('input', { type: 'checkbox', checked: filterAll });
       chk.addEventListener('change', () => { filterAll = chk.checked; });
@@ -146,10 +158,17 @@ export async function openEditor(docId, { onClose = () => {} } = {}) {
       fbar.append(h('button', { class: 'flt' + (f.id === now ? ' on' : ''), attrs: { type: 'button', 'aria-pressed': String(f.id === now) }, on: { click: () => applyFilterTo(f.id) } }, cv, h('span', { text: f.label })));
       return cv;
     });
-    previewBlobs(p, FILTERS.map((f) => ({ filter: f.id })), { side: 160, quality: 0.8 }).then((blobs) => {
-      if (my !== fbarTick || closed) return;
-      blobs.forEach((bl, i) => { const u = URL.createObjectURL(bl); fbUrls.push(u); thumbs[i].src = u; });
-    }).catch(() => {});
+    const key = [p.id, JSON.stringify(p.quad || null), p.rot || 0].join('|'), hit = fbCache.get(key);
+    if (hit) { hit.forEach((u, i) => { thumbs[i].src = u; }); return; }
+    fbTimer = setTimeout(() => {
+      previewBlobs(p, FILTERS.map((f) => ({ filter: f.id })), { side: 160, quality: 0.8 }).then((blobs) => {
+        if (closed) return;
+        const urls = blobs.map((bl) => URL.createObjectURL(bl));
+        fbCache.set(key, urls);
+        while (fbCache.size > 12) { const k = fbCache.keys().next().value; fbCache.get(k).forEach((u) => URL.revokeObjectURL(u)); fbCache.delete(k); }
+        if (my === fbarTick) urls.forEach((u, i) => { thumbs[i].src = u; });
+      }).catch(() => {});
+    }, 220);
   }
   const refresh = () => { drawStage(); drawStrip(); drawFilterBar(); };
   function go(i) { idx = Math.max(0, Math.min(pages.length - 1, i)); zoomed = false; refresh(); }

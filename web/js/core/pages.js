@@ -85,8 +85,9 @@ async function renderInWorker(page, { quality = 0.9, src = null, draft = false, 
     // página nueva: la foto aún no está codificada, se pasa tal cual (sin copiar) y se codifica a la vez en paralelo
     const bmp = await createImageBitmap(src);
     try { r = await cvRun('render', [{ ...job, bmp }], { transfer: [bmp], affinity: page.id, retry: false }); }
-    catch (e) { if (!e.retry || !origP) throw e; r = await cvRun('render', [{ ...job, orig: await origP }], { affinity: page.id }); }
+    catch (e) { if (!origP) throw e; r = await cvRun('render', [{ ...job, orig: await origP }], { affinity: page.id }); }   // si el motor falló, se repite con la foto ya codificada
   } else r = await cvRun('render', [{ ...job, orig: page.orig }], { affinity: page.id });
+  if (r.t) for (const [k, v] of Object.entries(r.t)) tm.step(k + ' ' + v);   // desglose dentro del motor: base (decodificar y recortar) · filtro (análisis y dibujo) · codificar
   tm.step('en el Worker'); tm.end();
   const res = { out: r.out, thumb: r.thumb, w: r.w, h: r.h, draft, rev: Date.now() + Math.random() };   // rev: versión de la imagen (para saber si un OCR hecho en segundo plano sigue valiendo)
   if (autoSkew) res.skew = r.skew || 0;
@@ -99,6 +100,14 @@ export async function rotateBlobs(page, quality = 0.92) {
   if (w) return w;
   const out = rotateCanvas(await blobToCanvas(page.out), 90), thumb = rotateCanvas(await blobToCanvas(page.thumb), 90);
   return { out: await toBlob(out, 'image/jpeg', quality), thumb: await toBlob(thumb, 'image/jpeg', 0.75), w: out.width, h: out.height };
+}
+
+// Prepara una página para el OCR dentro del Worker: ≤ 1800 px y en blanco y negro (PNG). → { blob, k, pixels } o null (se hace en el hilo principal)
+export async function prepareOcr(page) {
+  if (!page.out || !page.w) return null;
+  const job = { id: 'ocr:' + page.id, orig: page.out, quad: null, skew: 0, rot: 0, side: 1800, filter: page.filter === 'bn' ? 'original' : 'bn', draft: true, format: 'png', noThumb: true, nocache: true, px: 1800 * 1800 * 0.6 };
+  const r = await viaWorker(() => cvRun('render', [job]));
+  return r ? { blob: r.out, k: page.w / r.w, pixels: r.w * r.h } : null;
 }
 
 // Vistas previas (JPEG) de la página con uno o varios filtros: miniaturas del carrusel y vista inmediata al tocar un filtro.

@@ -36,6 +36,17 @@ cd android && ./gradlew assembleRelease                # JDK 21 + SDK de Android
 
 La firma del APK usa un almacén de claves local (`android-keystore/`, no incluido en el repositorio).
 
+## Cómo está hecho para ir rápido
+
+Todo el trabajo de imagen va **fuera del hilo principal**, para que la pantalla nunca se congele:
+
+- **GPU (WebGL2 en un Worker, `gl-ops.js`)**: recorta con perspectiva, endereza, gira y aplica los filtros con un «shader». La página recortada queda en la memoria de la GPU: cambiar de filtro, brillo o contraste solo vuelve a dibujar. Al arrancar se hace una **prueba de corrección** (todos los filtros, giro y perspectiva sobre una hoja conocida) y una **prueba de velocidad**; si la GPU es por software, es lenta o algo no cuadra, se usa OpenCV.
+- **OpenCV en otro Worker (`cv-worker.js`)**: detecta los bordes del papel y es el respaldo de la GPU (mismos resultados). Solo se carga cuando se va a escanear o importar.
+- **Sin pantallas de espera que bloqueen**: el resultado se ve al instante con una vista previa y la imagen final se genera detrás; las tareas tienen tiempo máximo y un vigilante reemplaza un motor que deje de responder.
+- **Ajustes → Diagnóstico de velocidad**: motor en uso, tiempo de cada paso y errores recientes; «Copiar informe» deja todo listo para pegar en un mensaje.
+
+Para probar un modo concreto: `?gpu=force` (sin la prueba de velocidad) o `?gpu=off` en la dirección de la web.
+
 ## Licencias
 
 © WG — Wilmar Gómez. Usa [OpenCV.js](https://docs.opencv.org/) y [Tesseract.js](https://tesseract.projectnaptha.com/) (Apache-2.0), [pdf-lib](https://pdf-lib.js.org/) (MIT) y [PDF.js](https://mozilla.github.io/pdf.js/) (Apache-2.0). Detalle en `web/vendor/LICENCIAS.txt`.

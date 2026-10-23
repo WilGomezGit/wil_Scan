@@ -94,7 +94,8 @@ async function renderFrom(cv, job) {
   let c = toCanvas(plain(f, bright, contrast) ? src : cvFilter(cv, src, { filter: f, bright, contrast }));
   if (!job.draft && !bn) c = enlarge(c);
   if (job.marks && job.marks.length) applyMarks(c, job.marks);
-  const thumb = await jpeg(scaled(c, 420), 0.75), out = await jpeg(c, job.quality || 0.9);
+  const thumb = job.noThumb ? null : await jpeg(scaled(c, 420), 0.75), out = job.format === 'png' ? await c.convertToBlob({ type: 'image/png' }) : await jpeg(c, job.quality || 0.9);
+  if (job.nocache) cache.delete([job.id, JSON.stringify(job.quad || null), job.skew || 0, job.rot || 0, job.side].join('|'));   // (imágenes de usar y tirar: no desplazan la página que se está editando)
   return { out, thumb, w: c.width, h: c.height, skew: job.skew || 0 };
 }
 

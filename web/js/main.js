@@ -9,7 +9,7 @@ import { openScanner } from './ui/scan.js';
 import { openEditor } from './ui/editor.js';
 import { newDoc, importPdf } from './core/docs.js';
 import { detectQuad } from './core/detect.js';
-import { canvasOf, loadCV, timer } from './core/cv.js';
+import { canvasOf, loadCV, loadGL, timer, logError } from './core/cv.js';
 import { scaled, blobToCanvas } from './core/pages.js';
 import { isNative } from './core/share.js';
 
@@ -61,6 +61,9 @@ async function importFiles(files) {
 }
 fileIn.addEventListener('change', () => importFiles(fileIn.files));
 
+window.addEventListener('error', (e) => logError(e.message || 'error'));
+window.addEventListener('unhandledrejection', (e) => logError('promesa: ' + ((e.reason && e.reason.message) || e.reason)));
+
 async function boot() {
   if (isNative()) disableHistoryLayers();
   await loadSettings();
@@ -84,7 +87,12 @@ async function boot() {
   if (NativeApp && NativeApp.addListener) NativeApp.addListener('backButton', () => { if (closeTopLayer()) return; if (view !== 'docs') show('docs'); else NativeApp.exitApp(); });
   window.WilScan = { show, openDoc, startScan, importFiles };
   document.documentElement.dataset.ready = '1';
-  // el motor de imagen (13 MB) se prepara en segundo plano para que el primer escaneo o filtro no espere
-  setTimeout(() => loadCV().catch(() => {}), 600);
+  // el motor de la GPU arranca en milisegundos y atiende los filtros y las páginas; OpenCV (13 MB) solo hace falta para detectar los bordes
+  // del papel, así que se prepara cuando el usuario va a escanear o importar (no antes: ahorra memoria y batería)
+  loadGL();
+  const warmCV = () => loadCV().catch(() => {});
+  $$('[data-scan]').forEach((el) => el.addEventListener('pointerdown', warmCV, { passive: true }));
+  $('#btnImport').addEventListener('pointerdown', warmCV, { passive: true });
+  setTimeout(warmCV, 4000);                // y, de todos modos, un poco después de abrir la app, cuando ya no compite con nada
 }
 boot().catch((e) => { console.error(e); toast('No se pudo iniciar la aplicación: ' + (e.message || e), 'error', 8000); });

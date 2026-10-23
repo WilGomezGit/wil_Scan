@@ -75,13 +75,15 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
   function process(it) {
     it.ready = false;
     // de una en una: así no se acumulan fotos grandes en memoria
-    it.page = queue = queue.then(() => (it.dead ? null : startPage(it))).then((p) => { it.ready = !!p; if (p && !it.dead) it.canvas = null; drawStrip(); return p; }).catch(() => { drawStrip(); return null; });
+    it.failed = false;
+    // si el procesado falla no se queda un círculo girando: la miniatura marca el fallo y al terminar se vuelve a intentar con la foto original
+    it.page = queue = queue.then(() => (it.dead ? null : startPage(it))).then((p) => { it.ready = !!p; it.failed = !p && !it.dead; if (p && !it.dead) it.canvas = null; drawStrip(); return p; }).catch(() => { it.failed = true; drawStrip(); return null; });
   }
   function drawStrip() {
     strip.textContent = ''; strip.hidden = !items.length;
     items.forEach((it, i) => {
-      strip.append(h('button', { class: 'scan-th' + (it.ready ? ' ok' : ' wait') + (i === retake ? ' retake' : ''), attrs: { type: 'button', role: 'listitem', 'aria-label': `Página ${i + 1}` + (it.ready ? '' : ' (procesando)') }, on: { click: () => itemMenu(i) } },
-        it.thumb, h('span', { class: 'n', text: String(i + 1) }), h('span', { class: 'st' }, it.ready ? icon('check', 's') : h('i', { class: 'scan-spin' }))));
+      strip.append(h('button', { class: 'scan-th' + (it.ready ? ' ok' : it.failed ? ' bad' : ' wait') + (i === retake ? ' retake' : ''), attrs: { type: 'button', role: 'listitem', 'aria-label': `Página ${i + 1}` + (it.ready ? '' : ' (procesando)') }, on: { click: () => itemMenu(i) } },
+        it.thumb, h('span', { class: 'n', text: String(i + 1) }), h('span', { class: 'st' }, it.ready ? icon('check', 's') : it.failed ? icon('close', 's') : h('i', { class: 'scan-spin' }))));
     });
     strip.scrollLeft = strip.scrollWidth;
     drawThumb();
@@ -99,8 +101,8 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
     const target = page || { canvas: it.canvas, quad: it.quad };
     const q = await openCropper(target, { title: 'Recortar la página', ok: 'Aplicar' });
     if (q === undefined) return;
-    it.quad = q; it.ready = false; drawStrip();
-    if (page) it.page = queue = queue.then(() => recropPage(page, q)).then((p) => { it.ready = true; drawStrip(); return p; }).catch(() => null);
+    it.quad = q; it.ready = false; it.failed = false; drawStrip();
+    if (page) it.page = queue = queue.then(() => recropPage(page, q)).then((p) => { it.ready = true; drawStrip(); return p; }).catch(() => { it.failed = true; drawStrip(); return null; });
     else process(it);
   }
 

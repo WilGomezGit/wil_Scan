@@ -3,7 +3,8 @@
 let engine = null;
 
 // Diagnóstico de velocidad (se muestra en Ajustes): qué motor se está usando y cuánto tarda cada paso
-export const perf = { engine: 'sin cargar', log: [] };
+export const perf = { engine: 'sin cargar', log: [], errors: [] };
+export const logError = (msg) => { perf.errors.unshift(new Date().toLocaleTimeString() + ' ' + String(msg).slice(0, 200)); perf.errors.length = Math.min(perf.errors.length, 15); };
 export function timer(label) {
   const t0 = performance.now(), steps = [];
   return { step(name) { steps.push(name + ' ' + Math.round(performance.now() - t0)); }, end() { perf.log.unshift(`${label}: ${Math.round(performance.now() - t0)} ms (${steps.join(' · ')})`); perf.log.length = Math.min(perf.log.length, 12); } };
@@ -14,17 +15,16 @@ export function timer(label) {
 // no pase de su tiempo máximo (según lo que suele tardar); si se pasa, ese motor se descarta y la tarea se repite en otro.
 // El tiempo corre desde que la tarea EMPIEZA (no mientras espera su turno detrás de otras).
 const slowest = {};
-const limitFor = (op, args) => {
-  const j = args[0] || {}, px = (j.px || (j.width && j.height ? j.width * j.height : 0)) / 1e6;
-  return slowest[op] ? Math.max(5000, slowest[op] * 4, px * 1500) : Math.max(20000, px * 5000);   // la 1.ª vez, margen amplio
-};
+// El vigilante solo debe detectar un motor MUERTO, nunca uno lento: matar uno sano obliga a recargarlo (OpenCV pesa 13 MB) y repetir todo.
+// Por eso los límites son muy holgados (un teléfono lento tarda varios segundos por página; un motor muerto no contesta nunca).
+const limitFor = (op, args) => Math.max(op === 'detect' || op === 'detectBmp' ? 30000 : 60000, (slowest[op] || 0) * 10);
 const retryable = (msg) => Object.assign(new Error(msg), { retry: true });
 
-function workerEngine() {
+function workerEngine(file = './cv-worker.js') {
   return new Promise((resolve, reject) => {
     if (typeof Worker === 'undefined') return reject(new Error('sin Worker'));
     const tw = performance.now();
-    const w = new Worker(new URL('./cv-worker.js', import.meta.url));
+    const w = new Worker(new URL(file, import.meta.url));
     const pending = new Map();
     let seq = 0, ready = false, running = null, lastMsg = performance.now(), dog = 0;
     const failAll = (err) => { for (const p of pending.values()) p.reject(err); pending.clear(); running = null; };
@@ -45,6 +45,7 @@ function workerEngine() {
       const m = e.data; lastMsg = performance.now();
       if (m.ready) {
         ready = true; h.caps = m.caps || {};
+        if (file.includes('gl-worker')) { resolve(h); dog = setInterval(() => { const now = performance.now(); if (running ? now - running.t0 > running.limit : pending.size && now - lastMsg > 8000) h.stop('el motor de la GPU dejó de responder'); }, 1000); return; }
         perf.engine = `Worker (segundo plano) · listo en ${Math.round(performance.now() - tw)} ms` + (m.ms ? ` (leer ${m.ms.leer} · iniciar ${m.ms.iniciar})` : '') + (h.caps.render ? ' · página completa en el Worker' : ' · página en el hilo principal');
         dog = setInterval(() => {
           const now = performance.now();
@@ -121,11 +122,43 @@ function pick(first, hint) {
   return best;
 }
 
-// Ejecuta una operación del Worker (cv-ops.js / render-ops.js). opts: { transfer: objetos que se pasan sin copiar, affinity: clave para volver al mismo motor, retry: false si los argumentos ya no se pueden reenviar }
+// ---- GPU ----
+// Las páginas (recorte, filtros, giro, vistas previas) se hacen en la GPU con WebGL2 dentro de su propio Worker: arranca en
+// milisegundos (no carga OpenCV) y procesa millones de píxeles a la vez. Si el teléfono no lo soporta o falla, se usa OpenCV.
+const GPU_OPS = new Set(['render', 'rotate90', 'preview']);
+let glP = null, glFails = 0, glOff = false;
+export function loadGL() {
+  if (glOff) return Promise.resolve(null);
+  if (!glP) {
+    let mode = 'auto';   // auto: con prueba de velocidad · force/off: para pruebas (?gpu=force o localStorage wilscan-gpu)
+    try { const m = new URLSearchParams(location.search).get('gpu') || localStorage.getItem('wilscan-gpu'); if (m === 'force' || m === 'off') mode = m; } catch { /* sin almacenamiento */ }
+    glP = workerEngine('./gl-worker.js?gpu=' + mode).then((h) => {
+      const g = h.caps.gpu || {};
+      if (!h.caps.render) { perf.gpu = 'GPU no disponible' + (g.error ? ': ' + g.error : ''); h.stop(); glOff = true; return null; }
+      perf.gpu = 'GPU (WebGL2): ' + g.renderer + (g.benchmarkMs != null ? ` · prueba: ${g.benchmarkMs} ms` : '');
+      return h;
+    }).catch((e) => { perf.gpu = 'GPU no disponible: ' + e.message; glOff = true; return null; });
+  }
+  return glP;
+}
+
+// Ejecuta una operación del Worker (cv-ops.js / render-ops.js / gl-ops.js). opts: { transfer: objetos que se pasan sin copiar, affinity: clave para volver al mismo motor, retry: false si los argumentos ya no se pueden reenviar }
 let lastUse = 0;
 export const cvIdleFor = (ms) => performance.now() - lastUse > ms;
 
-export async function cvRun(op, args, { transfer, affinity: hint, retry = true } = {}) {
+export async function cvRun(op, args, { transfer, affinity: hint, retry = true, cpu = false } = {}) {   // cpu: fuerza el motor de OpenCV (pruebas)
+  if (GPU_OPS.has(op) && !glOff && !cpu) {
+    const g = await loadGL();
+    if (g && !g.dead) {
+      try { const r = await g.run(op, args, transfer); glFails = 0; return r; }
+      catch (e) {
+        if (e.retry) glP = null;                                    // el motor de la GPU se cerró: se vuelve a abrir en la siguiente
+        else if (++glFails >= 3) glOff = true;                      // falla una y otra vez: se deja la GPU y se sigue con OpenCV
+        perf.gpuFallos = (perf.gpuFallos || 0) + 1; perf.gpuError = e.message;
+        if (transfer && transfer.length) throw e;                   // lo enviado sin copia ya no existe: lo repite quien llamó con la foto original
+      }
+    } else if (g && g.dead) glP = null;
+  }
   for (let attempt = 0; ; attempt++) {
     lastUse = performance.now();
     await loadCV();
@@ -140,12 +173,15 @@ export async function cvRun(op, args, { transfer, affinity: hint, retry = true }
   }
 }
 
-// ¿Puede el Worker procesar páginas completas (decodificar, filtrar y codificar)? Si no, se hace en el hilo principal como antes.
+// ¿Se pueden procesar páginas completas en un Worker (GPU u OpenCV)? Si no, se hace en el hilo principal como antes.
 let renderBroken = false;
 export const disableRender = () => { renderBroken = true; };
 export async function canRender() {
   if (renderBroken) return false;
-  try { await loadCV(); const e = await engine; return !!(e.caps && e.caps.render); } catch { return false; }
+  try {
+    const g = await loadGL(); if (g && !g.dead) return true;
+    await loadCV(); const e = await engine; return !!(e.caps && e.caps.render);
+  } catch { return false; }
 }
 
 export const imageOf = (canvas) => canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);

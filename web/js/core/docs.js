@@ -1,9 +1,9 @@
 // Operaciones de alto nivel sobre documentos (crear, páginas, OCR, PDF, unir, importar PDF).
 import { uid, saveDoc, getDoc, deleteDoc, savePage, getPage, getPages, deletePage, patchDoc, patchPage } from './db.js';
-import { newPage, rerender, toBlob, blobToCanvas, dropPre, rotateBlobs } from './pages.js';
+import { newPage, rerender, toBlob, blobToCanvas, dropPre, rotateBlobs, prepareOcr } from './pages.js';
 import { timer, cvIdleFor, cvLanes } from './cv.js';
 import { limiter, mapLimit } from './pool.js';
-import { recognize } from './ocr.js';
+import { recognize, recognizeImage } from './ocr.js';
 import { buildPdf } from './pdf-export.js';
 import { openForRender, renderPdfPage } from './pdf-tools.js';
 import { canvasOf } from './cv.js';
@@ -46,6 +46,15 @@ export async function ensureFull(page) {
   return page;
 }
 
+// Lee el texto de una página. La preparación de la imagen (reducir y pasar a blanco y negro) se hace en el Worker; si no se puede, aquí.
+async function readPage(page, lang, onProgress) {
+  const prep = await prepareOcr(page).catch(() => null);
+  if (prep) { const r = await recognizeImage(prep.blob, { k: prep.k, lang, onProgress, pixels: prep.pixels }); return { ...r, w: page.w, h: page.h }; }
+  const canvas = await blobToCanvas(page.out);
+  const r = await recognize(canvas, { lang, onProgress });
+  return { ...r, w: canvas.width, h: canvas.height };
+}
+
 // ---- OCR en segundo plano ----
 // Con «PDF buscable» activado, el texto de las páginas se reconoce sin esperar a que se pida: así exportar es casi inmediato.
 // Va de una página en una, cede el paso a cualquier OCR que pida el usuario y espera a que el motor de imagen esté libre.
@@ -67,11 +76,10 @@ async function pumpOcr() {
       if (!p || p.draft || (p.words && p.textLang === lang)) continue;   // los borradores se reconocen cuando tengan la imagen completa
       bgCurrent = id;
       bgJob = (async () => {
-        const rev = p.rev, canvas = await blobToCanvas(p.out);
-        const r = await recognize(canvas, { lang });
+        const rev = p.rev, r = await readPage(p, lang);
         const cur = await getPage(id);
         if (!cur || cur.rev !== rev) return;                          // la página cambió mientras tanto: ese texto ya no vale
-        Object.assign(cur, { text: r.text, textLang: lang, words: r.words, w: canvas.width, h: canvas.height });
+        Object.assign(cur, { text: r.text, textLang: lang, words: r.words, w: r.w, h: r.h });
         await savePage(cur);
       })();
       try { await bgJob; } catch { /* se reintentará cuando se pida */ }
@@ -179,9 +187,8 @@ export async function ocrPage(page, { lang = getSettings().ocrLang, onProgress, 
     // ¿ya lo reconoció el OCR en segundo plano? (misma versión de la imagen)
     const saved = await getPage(page.id);
     if (!force && saved && saved.rev === page.rev && saved.words && saved.textLang === lang) { Object.assign(page, { text: saved.text, textLang: lang, words: saved.words, w: saved.w, h: saved.h }); return page.text; }
-    const canvas = await blobToCanvas(page.out);
-    const r = await recognize(canvas, { lang, onProgress });
-    page.text = r.text; page.textLang = lang; page.words = r.words; page.w = canvas.width; page.h = canvas.height;
+    const r = await readPage(page, lang, onProgress);
+    page.text = r.text; page.textLang = lang; page.words = r.words; page.w = r.w; page.h = r.h;
     await savePage(page);
     return page.text;
   } finally { fg--; }
