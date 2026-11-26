@@ -45,6 +45,23 @@ function scene(w, h) {
   check('esquinas a menos de 12 px de las reales (imagen de 520 px)', worst < 12, 'peor ' + worst.toFixed(1) + ' px');
   check('rápido: menos de 80 ms por fotograma', ms / N < 80, (ms / N).toFixed(1) + ' ms');
 
+  // papel dentro de una funda de plástico (un rectángulo más grande, algo más claro que la mesa y de borde suave): debe elegir el papel, no la funda
+  {
+    let okF = 0;
+    for (let s = 0; s < 10; s++) {
+      const d = new Uint8ClampedArray(w * h * 4), a = (rnd() - 0.5) * 0.3, cx = w / 2, cy = h / 2;
+      const rect = (pw, ph) => [[-pw / 2, -ph / 2], [pw / 2, -ph / 2], [pw / 2, ph / 2], [-pw / 2, ph / 2]].map(([px, py]) => [cx + px * Math.cos(a) - py * Math.sin(a), cy + px * Math.sin(a) + py * Math.cos(a)]);
+      const sleeve = rect(300, 370), paper = rect(240, 320);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let v = 70; if (inside(sleeve, x, y)) v = 70 + 40 + 25 * Math.sin(x / 9 + y / 13); if (inside(paper, x, y)) v = 225;
+        v += (rnd() - 0.5) * 14; const i = (y * w + x) * 4; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+      }
+      const q = Q.detect({ data: d, width: w, height: h }), t = Q.orderQuad(paper);
+      if (q && Math.max(...q.map((p, i) => Math.hypot(p[0] - t[i][0], p[1] - t[i][1]))) < 12) okF++;
+    }
+    check('hoja dentro de una funda: elige la hoja, no la funda', okF >= 9, `${okF}/10`);
+  }
+
   // sin papel: una escena lisa con ruido no debe dar un falso documento
   const flat = new Uint8ClampedArray(w * h * 4); for (let i = 0; i < flat.length; i += 4) { const v = 120 + (rnd() - 0.5) * 20; flat[i] = flat[i + 1] = flat[i + 2] = v; flat[i + 3] = 255; }
   check('sin papel no inventa un documento', Q.detect({ data: flat, width: w, height: h }) === null);

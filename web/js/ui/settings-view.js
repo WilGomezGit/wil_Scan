@@ -7,7 +7,7 @@ import { usage, wipeAll, persist } from '../core/db.js';
 import { isNative } from '../core/share.js';
 import { perf, cvLanes } from '../core/cv.js';
 
-export const APP_VERSION = '1.0.8';
+export const APP_VERSION = '1.0.9';
 let installEvent = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; const b = $('#btnInstall'); if (b) b.hidden = false; });
 window.addEventListener('appinstalled', () => { installEvent = null; const b = $('#btnInstall'); if (b) b.hidden = true; toast('WilScan instalada', 'ok'); });

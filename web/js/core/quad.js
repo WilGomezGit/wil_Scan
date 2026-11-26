@@ -253,8 +253,43 @@ function candidates(mask, w, h, shrink) {
   return out;
 }
 
+// Fuerza del borde (Sobel, magnitud L1) de la imagen desenfocada
+function sobel(g, w, h) {
+  const mag = new Uint16Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const gx = -g[i - w - 1] - 2 * g[i - 1] - g[i + w - 1] + g[i - w + 1] + 2 * g[i + 1] + g[i + w + 1];
+      const gy = -g[i - w - 1] - 2 * g[i - w] - g[i - w + 1] + g[i + w - 1] + 2 * g[i + w] + g[i + w + 1];
+      mag[i] = (gx < 0 ? -gx : gx) + (gy < 0 ? -gy : gy);
+    }
+  }
+  return mag;
+}
+// Fuerza del borde a lo largo de los 4 lados de un cuadro: para cada punto del lado, el borde más fuerte a ±3 px (la detección no es exacta al píxel).
+function sideSamples(q, mag, w, h) {
+  const out = [];
+  for (let s = 0; s < 4; s++) {
+    const a = q[s], b = q[(s + 1) % 4], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L, side = [];
+    for (let k = 1; k < 40; k++) {
+      const t = k / 40, px = a[0] + dx * t, py = a[1] + dy * t; let m = 0;
+      for (let o = -3; o <= 3; o++) {
+        const x = Math.round(px + nx * o), y = Math.round(py + ny * o);
+        if (x > 0 && y > 0 && x < w - 1 && y < h - 1 && mag[y * w + x] > m) m = mag[y * w + x];
+      }
+      side.push(m);
+    }
+    out.push(side);
+  }
+  return out;
+}
+// ¿Qué parte de los lados cae sobre un borde nítido? (0..1, cada lado cuenta lo mismo). El papel tiene un borde fuerte y continuo;
+// una funda de plástico, una sombra o la mesa entera, no.
+const support = (sides, T) => sides.reduce((s, side) => s + side.filter((m) => m > T).length / side.length, 0) / 4;
+
 // img: { data: RGBA, width, height } ya reducida (≈ 400-520 px). Devuelve las 4 esquinas en píxeles de esa imagen, o null.
-export function detect(img) {
+// opts.debug: devuelve también todos los candidatos con su puntuación (para las pruebas).
+export function detect(img, opts = {}) {
   const w = img.width, h = img.height;
   if (w < 16 || h < 16) return null;
   const g = blur5(grayOf(img.data, w * h), w, h);
@@ -265,9 +300,18 @@ export function detect(img) {
   for (let i = 0; i < bin.length; i++) bin[i] = g[i] > th ? 255 : 0;
   const closed = morph(morph(bin, w, h, 2, true), w, h, 2, false);
   found = found.concat(candidates(morph(morph(closed, w, h, 2, false), w, h, 2, true), w, h, 0));
-  if (!found.length) return null;
-  found.sort((a, b) => b.ratio - a.ratio);
-  return found[0].q;
+  if (!found.length) return opts.debug ? { q: null, all: [] } : null;
+  // Antes ganaba siempre el cuadro más grande: con el papel dentro de una funda, sobre una hoja más grande o junto a una mesa clara
+  // se quedaba con lo de fuera. Ahora manda lo nítido que es el borde bajo los 4 lados; el tamaño solo desempata.
+  const mag = sobel(g, w, h);
+  for (const f of found) f.sides = sideSamples(f.q, mag, w, h);
+  // qué es «nítido» depende de la foto (papel blanco sobre una mesa clara tiene bordes suaves): la mitad de lo que mide el borde típico de los candidatos
+  const all = found.flatMap((f) => f.sides.flat()).sort((x, y) => x - y);
+  const T = Math.min(160, Math.max(24, all[Math.floor(all.length * 0.75)] * 0.5));
+  for (const f of found) { f.edge = support(f.sides, T); f.score = f.edge * Math.sqrt(f.ratio); }
+  found.sort((a, b) => b.score - a.score);
+  const best = found[0].edge >= 0.35 ? found[0].q : null;      // ningún lado claro: mejor no proponer nada que proponer un cuadro falso
+  return opts.debug ? { q: best, all: found.map((f) => ({ ratio: +f.ratio.toFixed(3), edge: +f.edge.toFixed(2), q: f.q.map((p) => p.map(Math.round)) })) } : best;
 }
 
 // ---------------------------------------------------------------- perspectiva
