@@ -2,7 +2,7 @@
 import { h, icon, toast, confirmBox, menuSheet, pushLayer, withBusy } from '../lib/dom.js';
 import { Camera } from '../core/camera.js';
 import { detectQuad } from '../core/detect.js';
-import { loadCV, canvasOf } from '../core/cv.js';
+import { loadCV, loadGL, canvasOf } from '../core/cv.js';
 import { warpQuad } from '../core/warp.js';
 import { scaled, blobToCanvas } from '../core/pages.js';
 import { composeIdSheet, startPage, recropPage } from '../core/docs.js';
@@ -122,7 +122,7 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
       flashBtn.hidden = !info.torch;
       video.classList.toggle('mirror', cam.facing === 'user');
       msg.hidden = true; setHint();
-      loadCV().catch(() => {});                           // calienta el motor de imagen mientras se encuadra
+      loadGL().then((g) => { if (!g) loadCV().catch(() => {}); });   // sin GPU útil, las páginas se hacen con OpenCV: se calienta mientras se encuadra
       loop();
     } catch (e) {
       const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
@@ -147,7 +147,7 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
     ovPoly.setAttribute('points', pts.map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' '));
     pts.forEach(([px, py], i) => { ovDots[i].setAttribute('cx', px.toFixed(1)); ovDots[i].setAttribute('cy', py.toFixed(1)); });
   }
-  let pace = 160;                                    // pausa entre detecciones: se alarga sola si cada una tarda (el teléfono va justo o el motor está ocupado procesando páginas)
+  let pace = 100;                                    // pausa entre detecciones: se alarga sola si cada una tarda (el teléfono va justo o el motor está ocupado procesando páginas)
   async function loop() {
     if (!running) return;
     if (!detecting && !shooting && video.videoWidth && document.visibilityState === 'visible') {
@@ -167,7 +167,7 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
       } catch (e) { quad = null; }
       detecting = false;
       paint();
-      pace = Math.min(700, Math.max(160, Math.round(pace * 0.5 + (performance.now() - t0) * 1.5)));   // la detección ocupa como mucho ~40 % del tiempo
+      pace = Math.min(700, Math.max(100, Math.round(pace * 0.5 + (performance.now() - t0) * 1.5)));   // la detección ocupa como mucho ~40 % del tiempo
     }
     setTimeout(loop, pace);
   }

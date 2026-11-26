@@ -559,18 +559,21 @@ async function benchmark() {
   return info.benchmarkMs;
 }
 
-export async function init(mode = 'auto') {   // mode: 'auto' (con prueba de velocidad) | 'force' (sin ella, para pruebas) | 'off'
+export async function init(mode = 'auto', known = null) {   // known: { renderer, ms } de una prueba de velocidad anterior superada en este teléfono   // mode: 'auto' (con prueba de velocidad) | 'force' (sin ella, para pruebas) | 'off'
   try {
     if (mode === 'off') { info.error = 'desactivada en los ajustes'; return false; }
     ensureGL();
     if (!(await selfTest())) { info.error = info.error || 'la prueba inicial dio un resultado distinto'; return false; }
     if (mode !== 'force') {
       if (/swiftshader|llvmpipe|software|softpipe|basic render/i.test(info.renderer)) { info.error = 'GPU por software (' + info.renderer + ')'; return false; }
+      // la prueba de velocidad tarda casi un segundo en un teléfono: si esta misma GPU ya la pasó, no se repite en cada arranque
+      // (la prueba de corrección de arriba sí se hace siempre: es rápida y protege de un controlador roto tras una actualización)
+      if (known && known.renderer === info.renderer && known.ms <= SLOW_MS) { info.benchmarkMs = known.ms; info.cached = true; return true; }
       const ms = await benchmark();
       if (ms > SLOW_MS) { info.error = 'GPU lenta en la prueba (' + ms + ' ms por filtro de 3 MP)'; return false; }
     }
     return true;
   } catch (e) { info.error = String((e && e.message) || e); return false; }
 }
-export const status = () => ({ gpu: true, renderer: info.renderer, error: info.error, benchmarkMs: info.benchmarkMs });
+export const status = () => ({ gpu: true, renderer: info.renderer, error: info.error, benchmarkMs: info.benchmarkMs, cached: !!info.cached });
 

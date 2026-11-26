@@ -41,7 +41,9 @@ La firma del APK usa un almacén de claves local (`android-keystore/`, no inclui
 Todo el trabajo de imagen va **fuera del hilo principal**, para que la pantalla nunca se congele:
 
 - **GPU (WebGL2 en un Worker, `gl-ops.js`)**: recorta con perspectiva, endereza, gira y aplica los filtros con un «shader». La página recortada queda en la memoria de la GPU: cambiar de filtro, brillo o contraste solo vuelve a dibujar. Al arrancar se hace una **prueba de corrección** (todos los filtros, giro y perspectiva sobre una hoja conocida) y una **prueba de velocidad**; si la GPU es por software, es lenta o algo no cuadra, se usa OpenCV.
-- **OpenCV en otro Worker (`cv-worker.js`)**: detecta los bordes del papel y es el respaldo de la GPU (mismos resultados). Solo se carga cuando se va a escanear o importar.
+- **Detector de bordes en JavaScript puro (`quad.js`, en su propio Worker `detect-worker.js`)**: unos KB en vez de los 13 MB de OpenCV, así el contorno del papel aparece desde el primer fotograma de la cámara (mismo método y misma precisión que con OpenCV). También endereza el documento de identidad.
+- **OpenCV en otro Worker (`cv-worker.js`)**: solo es el respaldo cuando el teléfono no tiene una GPU útil; ya no se carga al abrir la app.
+- **La prueba de velocidad de la GPU se recuerda**: si esta misma GPU ya la pasó, no se repite en cada arranque (la de corrección sí).
 - **Sin pantallas de espera que bloqueen**: el resultado se ve al instante con una vista previa y la imagen final se genera detrás; las tareas tienen tiempo máximo y un vigilante reemplaza un motor que deje de responder.
 - **Ajustes → Diagnóstico de velocidad**: motor en uso, tiempo de cada paso y errores recientes; «Copiar informe» deja todo listo para pegar en un mensaje.
 

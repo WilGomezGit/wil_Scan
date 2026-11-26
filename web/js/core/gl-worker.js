@@ -19,8 +19,10 @@ async function run({ id, op, args }) {
   try {
     const t0 = performance.now();
     ops = await import('./gl-ops.js');
-    const mode = new URLSearchParams(self.location.search).get('gpu') || 'auto';     // auto | force | off
-    const ok = await ops.init(mode);
+    const q = new URLSearchParams(self.location.search);
+    const mode = q.get('gpu') || 'auto';     // auto | force | off
+    let known = null; try { known = JSON.parse(q.get('known') || 'null'); } catch { /* sin datos */ }
+    const ok = await ops.init(mode, known);
     self.postMessage({ ready: true, caps: { render: ok, gpu: ops.status() }, ms: { leer: 0, iniciar: Math.round(performance.now() - t0) } });
   } catch (err) { self.postMessage({ fatal: String((err && err.message) || err) }); }
 })();

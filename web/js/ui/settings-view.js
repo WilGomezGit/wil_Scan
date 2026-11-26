@@ -5,9 +5,9 @@ import { FILTERS } from '../core/filters.js';
 import { LANGS } from '../core/ocr.js';
 import { usage, wipeAll, persist } from '../core/db.js';
 import { isNative } from '../core/share.js';
-import { perf, loadCV, cvLanes } from '../core/cv.js';
+import { perf, cvLanes } from '../core/cv.js';
 
-export const APP_VERSION = '1.0.4';
+export const APP_VERSION = '1.0.5';
 let installEvent = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; const b = $('#btnInstall'); if (b) b.hidden = false; });
 window.addEventListener('appinstalled', () => { installEvent = null; const b = $('#btnInstall'); if (b) b.hidden = true; toast('WilScan instalada', 'ok'); });
@@ -32,7 +32,7 @@ export function initSettings() {
   const drawDiag = () => {
     const lines = [...perf.log, ...(perf.ops || []).slice(0, 6)];
     diag.textContent = '';
-    diag.append(h('p', { class: 'tight', text: (perf.gpu || 'GPU: sin iniciar') + (perf.gpuFallos ? ` · caídas a OpenCV: ${perf.gpuFallos}` : '') }), h('p', { class: 'tight', text: 'Motor de bordes (OpenCV): ' + perf.engine + (perf.restarts ? ` · reinicios: ${perf.restarts}` : '') }),
+    diag.append(h('p', { class: 'tight', text: (perf.gpu || 'GPU: sin iniciar') + (perf.gpuFallos ? ` · caídas a OpenCV: ${perf.gpuFallos}` : '') }), h('p', { class: 'tight', text: 'Bordes: detector rápido (JavaScript) · OpenCV de respaldo: ' + perf.engine + (perf.restarts ? ` · reinicios: ${perf.restarts}` : '') }),
       ...(lines.length ? lines.map((l) => h('p', { class: 'tight', text: l })) : [h('p', { class: 'tight', text: 'Aún no hay medidas: gira o filtra una página y pulsa Actualizar.' })]));
   };
   // Informe para pegar en un mensaje: el motor que se usa, cuánto tarda cada tarea, errores recientes y datos del teléfono
@@ -63,7 +63,7 @@ export function initSettings() {
           swState, h('div', { class: 'label', text: 'Almacenamiento' }), storage,
           h('div', { class: 'btn-row set-actions' }, h('button', { class: 'btn danger', attrs: { type: 'button' }, on: { click: async () => { if (await confirmBox({ title: '¿Borrar todos los datos?', text: 'Se eliminarán todos los documentos, la firma y los ajustes de este dispositivo. No se puede deshacer.', ok: 'Borrar todo', danger: true })) { await wipeAll(); toast('Datos borrados', 'ok'); setTimeout(() => location.reload(), 700); } } } }, icon('trash', 's'), 'Borrar todos los datos'))),
         h('div', { class: 'section-title', text: 'Diagnóstico de velocidad' }),
-        h('div', { class: 'card pad' }, diag, h('div', { class: 'btn-row' }, h('button', { class: 'btn small', attrs: { type: 'button' }, on: { click: () => { loadCV().catch(() => {}).then(drawDiag); } } }, 'Actualizar'), h('button', { class: 'btn small', attrs: { type: 'button' }, on: { click: copyReport } }, icon('copy', 's'), 'Copiar informe'))),
+        h('div', { class: 'card pad' }, diag, h('div', { class: 'btn-row' }, h('button', { class: 'btn small', attrs: { type: 'button' }, on: { click: drawDiag } }, 'Actualizar'), h('button', { class: 'btn small', attrs: { type: 'button' }, on: { click: copyReport } }, icon('copy', 's'), 'Copiar informe'))),
         h('div', { class: 'section-title', text: 'Acerca de' }),
         h('div', { class: 'card pad about' },
           h('div', { class: 'about-head' }, h('img', { src: new URL('../../assets/logo.svg', import.meta.url).href, alt: 'WG', width: 44, height: 44 }), h('div', {}, h('b', { text: 'WilScan' }), h('small', { text: ` versión ${APP_VERSION}` }), h('p', { class: 'hint tight', text: 'Una creación de WG — Wilmar Gómez' }))),

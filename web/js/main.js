@@ -8,7 +8,7 @@ import { initSettings } from './ui/settings-view.js';
 import { openScanner } from './ui/scan.js';
 import { openEditor } from './ui/editor.js';
 import { newDoc, importPdf } from './core/docs.js';
-import { detectQuad } from './core/detect.js';
+import { detectQuad, detectWorker } from './core/detect.js';
 import { canvasOf, loadCV, loadGL, timer, logError } from './core/cv.js';
 import { scaled, blobToCanvas } from './core/pages.js';
 import { isNative } from './core/share.js';
@@ -87,12 +87,12 @@ async function boot() {
   if (NativeApp && NativeApp.addListener) NativeApp.addListener('backButton', () => { if (closeTopLayer()) return; if (view !== 'docs') show('docs'); else NativeApp.exitApp(); });
   window.WilScan = { show, openDoc, startScan, importFiles };
   document.documentElement.dataset.ready = '1';
-  // el motor de la GPU arranca en milisegundos y atiende los filtros y las páginas; OpenCV (13 MB) solo hace falta para detectar los bordes
-  // del papel, así que se prepara cuando el usuario va a escanear o importar (no antes: ahorra memoria y batería)
-  loadGL();
-  const warmCV = () => loadCV().catch(() => {});
+  // La GPU (milisegundos) atiende las páginas y el detector de bordes en JavaScript (unos KB) atiende la cámara: los dos arrancan al instante.
+  // OpenCV (13 MB, varios segundos y mucha memoria en un teléfono) ya no se carga al abrir la app: solo si este teléfono no tiene una GPU útil.
+  detectWorker();
+  const gl = loadGL();
+  const warmCV = () => gl.then((g) => { if (!g) loadCV().catch(() => {}); });
   $$('[data-scan]').forEach((el) => el.addEventListener('pointerdown', warmCV, { passive: true }));
   $('#btnImport').addEventListener('pointerdown', warmCV, { passive: true });
-  setTimeout(warmCV, 4000);                // y, de todos modos, un poco después de abrir la app, cuando ya no compite con nada
 }
 boot().catch((e) => { console.error(e); toast('No se pudo iniciar la aplicación: ' + (e.message || e), 'error', 8000); });

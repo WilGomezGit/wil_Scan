@@ -17,7 +17,7 @@ async function launch({ url = 'about:blank', fakeVideo = null, mobile = false, w
   fs.mkdirSync(dl, { recursive: true }); fs.mkdirSync(path.join(prof, 'Default'), { recursive: true });
   fs.writeFileSync(path.join(prof, 'Default', 'Preferences'), JSON.stringify({ download: { default_directory: dl, prompt_for_download: false, directory_upgrade: true }, savefile: { default_directory: dl } }));
   if (fakeVideo) flags.push(`--use-file-for-fake-video-capture=${fakeVideo}`);
-  const proc = spawn(CHROME, [...flags, 'about:blank'], { stdio: 'ignore' });
+  const proc = spawn(CHROME, [...flags, ...(process.env.CHROME_FLAGS ? process.env.CHROME_FLAGS.split(' ') : []), 'about:blank'], { stdio: 'ignore' });
   const getJson = (p) => new Promise((res, rej) => http.get({ host: '127.0.0.1', port, path: p }, (r) => { let b = ''; r.on('data', (d) => (b += d)); r.on('end', () => { try { res(JSON.parse(b)); } catch (e) { rej(e); } }); }).on('error', rej));
   let tgt = null;
   for (let i = 0; i < 60 && !tgt; i++) { await sleep(400); try { tgt = (await getJson('/json')).find((t) => t.type === 'page'); } catch { /* arrancando */ } }
