@@ -243,7 +243,7 @@ G.paginas = async () => {
   check('cambiar el nombre actualiza el título', (await text('.ed-title')) === 'Factura marzo' && (await dbDocs())[0].title === 'Factura marzo');
   // volver a la biblioteca
   await click('.ed-top .icon-btn'); await sleep(700);
-  check('al volver, la biblioteca muestra el documento con 3 páginas', (await count('.doc')) === 1 && (await text('.doc-n')) === '3' && (await text('.doc-title')) === 'Factura marzo');
+  check('al volver, la biblioteca muestra el documento con 3 páginas', (await count('.doc')) === 1 && /^3 páginas/.test(await text('.doc-n')) && (await text('.doc-title')) === 'Factura marzo');
   await shot('07-biblioteca'); await audit('biblioteca con documento (móvil)');
 };
 

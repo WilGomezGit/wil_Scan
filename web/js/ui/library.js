@@ -1,4 +1,5 @@
-// Pantalla «Documentos»: cuadrícula con búsqueda, selección múltiple, menú por documento y acciones en lote.
+// Pantalla de inicio: búsqueda, accesos rápidos (escanear, importar, herramientas…) y la lista de documentos recientes con selección múltiple,
+// menú por documento y acciones en lote.
 import { h, icon, $, toast, confirmBox, promptBox, menuSheet, emptyState, fmtDate, safeName, withBusy } from '../lib/dom.js';
 import { listDocs, saveDoc, deleteDoc, getDoc } from '../core/db.js';
 import { mergeDocs } from '../core/docs.js';
@@ -9,11 +10,23 @@ let cbs = {}, docs = [], query = '', selecting = false, selected = new Set(), ur
 export function initLibrary(callbacks) {
   cbs = callbacks;
   const root = $('#v-docs');
+  // accesos rápidos: lo que más se usa, a un toque (el color de cada uno ayuda a encontrarlo de un vistazo)
+  const QUICK = [
+    ['scan', 'Escanear', 'c1', () => cbs.onScan()],
+    ['idcard', 'Identificación', 'c2', () => cbs.onScanId()],
+    ['image', 'Importar imágenes', 'c3', () => cbs.onImport()],
+    ['upload', 'Importar PDF', 'c4', () => cbs.onTool('importpdf')],
+    ['text', 'Sacar texto', 'c5', () => cbs.onTool('img2txt')],
+    ['sign', 'Firmar PDF', 'c6', () => cbs.onTool('sign')],
+    ['merge', 'Unir PDF', 'c7', () => cbs.onTool('merge')],
+    ['grid', 'Todas las herramientas', 'c8', () => cbs.onTools()],
+  ];
   root.append(
-    h('div', { class: 'view-head' }, h('h1', { text: 'Documentos' }),
-      h('button', { id: 'btnSelect', class: 'btn small', attrs: { type: 'button' }, on: { click: toggleSelect } }, icon('select', 's'), 'Seleccionar')),
     h('div', { class: 'search' }, icon('search', 's'), h('input', { id: 'search', type: 'search', placeholder: 'Buscar documentos', attrs: { 'aria-label': 'Buscar documentos', autocomplete: 'off' }, on: { input: (e) => { query = e.target.value.trim().toLowerCase(); draw(); } } })),
-    h('div', { id: 'docGrid', class: 'doc-grid' }),
+    h('div', { class: 'quick', attrs: { role: 'list' } }, QUICK.map(([ic, label, c, run]) => h('button', { class: 'q ' + c, attrs: { type: 'button', role: 'listitem' }, on: { click: run } }, h('span', { class: 'q-ic' }, icon(ic)), h('span', { class: 'q-tx', text: label })))),
+    h('div', { class: 'recent-head' }, h('h2', { text: 'Recientes' }),
+      h('button', { id: 'btnSelect', class: 'btn small ghost', attrs: { type: 'button' }, on: { click: toggleSelect } }, icon('select', 's'), 'Seleccionar')),
+    h('div', { id: 'docGrid', class: 'doc-list' }),
     h('div', { id: 'selBar', class: 'selbar', hidden: true }));
   refreshDocs();
 }
@@ -30,14 +43,13 @@ function draw() {
   grid.textContent = '';
   $('#btnSelect').textContent = ''; $('#btnSelect').append(icon(selecting ? 'close' : 'select', 's'), selecting ? 'Cancelar' : 'Seleccionar');
   $('#btnSelect').hidden = !docs.length;
-  $('#search').parentElement.hidden = !docs.length;
   const list = visibleDocs();
   if (!docs.length) {
     grid.className = '';
     grid.append(emptyState({ iconName: 'scan', title: 'Aún no hay documentos', text: 'Escanea tu primer documento con la cámara o importa fotos y PDF desde tu dispositivo. Todo se queda en tu equipo.', action: h('div', { class: 'btn-row center' }, h('button', { class: 'btn primary', attrs: { type: 'button' }, on: { click: () => cbs.onScan() } }, icon('scan', 's'), 'Escanear'), h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => cbs.onImport() } }, icon('image', 's'), 'Importar')) }));
     drawSelBar(); return;
   }
-  grid.className = 'doc-grid';
+  grid.className = 'doc-list';
   if (!list.length) { grid.className = ''; grid.append(h('p', { class: 'hint center', text: 'Ningún documento coincide con la búsqueda.' })); drawSelBar(); return; }
   for (const d of list) {
     let url = null;
@@ -45,14 +57,13 @@ function draw() {
     const sel = selected.has(d.id);
     const act = () => (selecting ? pick(d.id) : cbs.onOpen(d.id));
     const label = (selecting ? 'Seleccionar ' : 'Abrir ') + d.title;
-    // la miniatura y el título abren el documento; el botón «⋮» va en el pie, sin tapar nada
+    const pages = d.pageCount === 1 ? '1 página' : `${d.pageCount} páginas`;
     const card = h('div', { class: 'doc' + (sel ? ' sel' : ''), data: { id: d.id } },
       h('button', { class: 'doc-open', attrs: { type: 'button', 'aria-label': label }, on: { click: act } },
-        h('span', { class: 'doc-thumb' }, url ? h('img', { src: url, alt: '', loading: 'lazy', draggable: false }) : icon('file', 'l'), h('span', { class: 'doc-n', text: String(d.pageCount) }),
-          selecting ? h('span', { class: 'doc-check' + (sel ? ' on' : ''), attrs: { 'aria-hidden': 'true' } }, sel ? icon('check', 's') : null) : null)),
-      h('div', { class: 'doc-foot' },
-        h('button', { class: 'doc-info', attrs: { type: 'button', 'aria-label': label }, on: { click: act } }, h('span', { class: 'doc-title', text: d.title }), h('span', { class: 'doc-meta', text: fmtDate(d.updated || d.created) })),
-        selecting ? null : h('button', { class: 'icon-btn doc-more', attrs: { type: 'button', 'aria-label': 'Más acciones de ' + d.title }, on: { click: () => docMenu(d) } }, icon('more'))));
+        h('span', { class: 'doc-thumb' }, url ? h('img', { src: url, alt: '', loading: 'lazy', draggable: false }) : icon('file', 'l')),
+        h('span', { class: 'doc-info' }, h('span', { class: 'doc-title', text: d.title }), h('span', { class: 'doc-meta' }, fmtDate(d.updated || d.created), h('span', { class: 'doc-n' }, icon('file', 's'), pages)))),
+      selecting ? h('span', { class: 'doc-check' + (sel ? ' on' : ''), attrs: { 'aria-hidden': 'true' } }, sel ? icon('check', 's') : null)
+        : h('button', { class: 'icon-btn doc-more', attrs: { type: 'button', 'aria-label': 'Más acciones de ' + d.title }, on: { click: () => docMenu(d) } }, icon('more')));
     grid.append(card);
   }
   drawSelBar();

@@ -3,7 +3,7 @@ import { h, icon, $, $$, toast, withBusy, stamp, safeName, closeTopLayer, disabl
 import { loadSettings } from './lib/settings.js';
 import { purgeOrphanPages } from './core/db.js';
 import { initLibrary, refreshDocs } from './ui/library.js';
-import { initTools } from './ui/tools.js';
+import { initTools, openTool } from './ui/tools.js';
 import { initSettings } from './ui/settings-view.js';
 import { openScanner } from './ui/scan.js';
 import { openEditor } from './ui/editor.js';
@@ -24,8 +24,9 @@ function show(v) {
 
 async function openDoc(id) { await openEditor(id, { onClose: () => refreshDocs() }); }
 
-function startScan() {
+function startScan(startMode = 'doc') {
   openScanner({
+    startMode,
     onDone: async (items) => {
       const { doc } = await withBusy('Guardando el documento…', (b) => newDoc('Escaneo ' + stamp(), items, { onProgress: (f) => b.update('Procesando páginas…', f) }));
       show('docs'); await openDoc(doc.id);
@@ -68,12 +69,12 @@ async function boot() {
   if (isNative()) disableHistoryLayers();
   await loadSettings();
   purgeOrphanPages().catch(() => {});   // páginas de una importación que se cortó (cierre forzado) y nunca llegaron a tener documento
-  initLibrary({ onOpen: openDoc, onScan: startScan, onImport: () => fileIn.click() });
+  initLibrary({ onOpen: openDoc, onScan: () => startScan(), onScanId: () => startScan('id'), onImport: () => fileIn.click(), onTool: openTool, onTools: () => show('tools') });
   initTools({ onOpenDoc: async (id) => { show('docs'); await openDoc(id); } });
   initSettings();
   document.body.append(fileIn);
   $$('[data-tab]').forEach((el) => el.addEventListener('click', () => show(el.dataset.tab)));
-  $$('[data-scan]').forEach((el) => el.addEventListener('click', startScan));
+  $$('[data-scan]').forEach((el) => el.addEventListener('click', () => startScan()));
   $('#btnImport').addEventListener('click', () => fileIn.click());
   show('docs');
   if (!isNative() && 'serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
