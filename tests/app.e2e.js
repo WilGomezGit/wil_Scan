@@ -161,12 +161,13 @@ G.editor = async () => {
 
 G.exportar = async () => {
   await click('.ed-top .btn.primary');
-  check('«Exportar» abre la hoja con PDF / Imágenes / Texto', !!(await wf(() => c.ev(`[...document.querySelectorAll('.sheet .seg button')].map(b=>b.textContent).join()==='PDF,Imágenes,Texto'`), 6000)));
+  check('«Exportar» abre la hoja con las acciones de un toque', !!(await wf(() => c.ev(`/Compartir como PDF.*Compartir como imágenes.*Compartir como texto.*Guardar PDF/.test([...document.querySelectorAll('.sheet .exp-act')].map(b=>b.textContent).join('|'))`), 6000)));
   await shot('06-exportar'); await audit('hoja de exportar (móvil)');
   // PDF buscable
   let before = downloads();
   await c.ev(`(()=>{const i=document.querySelector('.sheet .field input'); i.value='Factura de prueba'; i.dispatchEvent(new Event('input',{bubbles:true})); return true})()`);
-  await clickText('.sheet-foot .btn', 'Guardar');
+  await c.ev(`(()=>{ const i=[...document.querySelectorAll('.sheet .check input')].find((x)=>/buscable/.test(x.parentElement.textContent)); if (!i.checked) i.click(); return true })()`);   // el PDF buscable solo se hace si se pide
+  await clickText('.sheet .exp-act', 'Guardar PDF');
   const pdf = await newDownloads(before, 1, 120000);
   check('«Guardar» descarga un PDF con el nombre elegido', pdf.length === 1 && pdf[0].n === 'Factura de prueba.pdf', pdf.map((x) => x.n).join());
   if (pdf[0]) {
@@ -175,30 +176,27 @@ G.exportar = async () => {
     check('el PDF es buscable: contiene el texto reconocido', /factura 2026-0042/.test(norm(info.t)) && /total a pagar/.test(norm(info.t)), norm(info.t).slice(0, 60));
     fs.copyFileSync(pdf[0].p, path.join(DL, '_base.pdf.keep')); fs.copyFileSync(pdf[0].p, path.join(DL, 'exportado.pdf'));
   }
-  // imágenes
-  await click('.ed-top .btn.primary'); await wf(() => exists('.sheet .seg'), 4000);
-  await clickText('.sheet .seg button', 'Imágenes');
-  before = downloads();
-  await clickText('.sheet-foot .btn', 'Guardar');
-  const jpgs = await newDownloads(before, 2, 30000);
-  check('«Imágenes» descarga un JPG por página', jpgs.length === 2 && jpgs.every((x) => /\.jpg$/.test(x.n)), jpgs.map((x) => x.n).join());
-  // texto
-  await click('.ed-top .btn.primary'); await wf(() => exists('.sheet .seg'), 4000);
-  await clickText('.sheet .seg button', 'Texto');
-  before = downloads();
-  await clickText('.sheet-foot .btn', 'Guardar');
-  const txt = await newDownloads(before, 1, 90000);
-  check('«Texto» descarga un .txt con el contenido', txt.length === 1 && /1\.250,00 EUR/.test(fs.readFileSync(txt[0].p, 'utf8')), txt.map((x) => x.n).join());
+  // imágenes y texto: se comprueba lo que recibe la hoja de compartir del sistema (simulada)
+  await c.ev(`window.__shared = []; window.__sh0 = navigator.share; window.__cs0 = navigator.canShare; navigator.canShare = () => true; navigator.share = async (d) => { window.__shared.push({ files: await Promise.all(d.files.map(async (f) => ({ name: f.name, type: f.type, text: f.type.startsWith('text') ? await f.text() : '' }))) }); }; true`);
+  await click('.ed-top .btn.primary'); await wf(() => exists('.sheet .exp-act'), 4000);
+  await clickText('.sheet .exp-act', 'Compartir como imágenes');
+  const jp = await wf(() => c.ev(`window.__shared.length>0 && window.__shared[0]`), 30000);
+  check('«Compartir como imágenes» entrega un JPG por página', !!jp && jp.files.length === 2 && jp.files.every((x) => /\.jpg$/.test(x.name)), j(jp));
+  await click('.ed-top .btn.primary'); await wf(() => exists('.sheet .exp-act'), 4000);
+  await clickText('.sheet .exp-act', 'Compartir como texto');
+  const tx = await wf(() => c.ev(`window.__shared.length>1 && window.__shared[1]`), 90000);
+  check('«Compartir como texto» entrega un .txt con el contenido', !!tx && tx.files.length === 1 && /\.txt$/.test(tx.files[0].name) && /1\.250,00 EUR/.test(tx.files[0].text), j(tx && tx.files.map((f) => f.name)));
+  await c.ev(`navigator.share = window.__sh0; navigator.canShare = window.__cs0; true`);
   await closeSheets();
 };
 
 G.compartir = async () => {
   // la hoja de compartir del sistema se simula: se comprueba qué archivo recibe (WhatsApp, correo, Telegram… son apps que cuelgan de esa hoja)
   await c.ev(`window.__shared = []; window.__opened = []; navigator.canShare = () => true; navigator.share = async (d) => { window.__shared.push({ title: d.title, files: d.files.map((f) => ({ name: f.name, type: f.type, size: f.size })) }); }; window.open = (u) => { window.__opened.push(u); return null; }; true`);
-  await click('.ed-top .btn.primary'); await wf(() => exists('.sheet .seg'), 4000);
-  check('la hoja de exportar anuncia WhatsApp, correo, Telegram y Discord', /WhatsApp, correo, Telegram, Discord/.test(await text('.sheet')) && /Compartir…/.test(await text('.sheet-foot')));
+  await click('.ed-top .btn.primary'); await wf(() => exists('.sheet .exp-act'), 4000);
+  check('la hoja de exportar anuncia WhatsApp, correo y Telegram', /WhatsApp, correo, Telegram/.test(await text('.sheet')));
   await c.ev(`(()=>{ [...document.querySelectorAll('.sheet .check input')].forEach((i)=>{ if (i.checked && /buscable/.test(i.parentElement.textContent)) i.click(); }); return true })()`);
-  await clickText('.sheet-foot .btn', 'Compartir');
+  await clickText('.sheet .exp-act', 'Compartir como PDF');
   const got = await wf(() => c.ev(`window.__shared.length>0`), 60000);
   const sh = got ? await c.ev(`window.__shared[0]`) : null;
   check('«Compartir…» entrega el PDF a la hoja de compartir del sistema', !!sh && sh.files.length === 1 && sh.files[0].type === 'application/pdf' && /.pdf$/.test(sh.files[0].name) && sh.files[0].size > 1000, j(sh));
@@ -206,9 +204,9 @@ G.compartir = async () => {
   // sin hoja de compartir (navegador de escritorio sin esa función): se guarda y se ofrecen accesos directos
   await c.ev(`navigator.canShare = undefined; navigator.share = undefined; true`);
   const before = downloads();
-  await click('.ed-top .btn.primary'); await wf(() => exists('.sheet .seg'), 4000);
+  await click('.ed-top .btn.primary'); await wf(() => exists('.sheet .exp-act'), 4000);
   await c.ev(`(()=>{ [...document.querySelectorAll('.sheet .check input')].forEach((i)=>{ if (i.checked && /buscable/.test(i.parentElement.textContent)) i.click(); }); return true })()`);
-  await clickText('.sheet-foot .btn', 'Compartir');
+  await clickText('.sheet .exp-act', 'Compartir como PDF');
   const help = await wf(() => c.ev(`/Enviar el archivo/.test((document.querySelector('.sheet-head h2')||{}).textContent||'')`), 60000);
   check('sin hoja de compartir: guarda el archivo y muestra «Enviar el archivo»', !!help && (await newDownloads(before, 1, 20000)).length === 1);
   await shot('06b-enviar'); await audit('hoja «Enviar el archivo» (móvil)');
@@ -243,7 +241,7 @@ G.paginas = async () => {
   check('cambiar el nombre actualiza el título', (await text('.ed-title')) === 'Factura marzo' && (await dbDocs())[0].title === 'Factura marzo');
   // volver a la biblioteca
   await click('.ed-top .icon-btn'); await sleep(700);
-  check('al volver, la biblioteca muestra el documento con 3 páginas', (await count('.doc')) === 1 && (await text('.doc-n')) === '3' && (await text('.doc-title')) === 'Factura marzo');
+  check('al volver, la biblioteca muestra el documento con 3 páginas', (await count('.doc')) === 1 && /^3 páginas/.test(await text('.doc-n')) && (await text('.doc-title')) === 'Factura marzo');
   await shot('07-biblioteca'); await audit('biblioteca con documento (móvil)');
 };
 
@@ -509,7 +507,7 @@ G.ajustes = async () => {
   await c.send('Page.reload'); await wf(() => c.ev(`document.documentElement.dataset.ready==='1'`), 15000); await sleep(400);
   await c.ev(`WilScan.show('settings'); true`); await sleep(300);
   const st = await c.ev(`new Promise((res)=>{const r=indexedDB.open('wilscan'); r.onsuccess=()=>{const g=r.result.transaction('kv').objectStore('kv').get('settings'); g.onsuccess=()=>res(g.result)}})`);
-  check('los ajustes se guardan y sobreviven al recargar', st && st.pdfSize === 'letter' && st.autoCapture === true, j(st));
+  check('los ajustes se guardan y sobreviven al recargar', st && st.pdfSize === 'letter' && st.autoCapture === false && st.v6 === true, j(st));
   check('muestra el almacenamiento usado', /usados de/.test(await text('#v-settings .card.pad .hint')) || /usados de/.test(await text('#v-settings')));
   const sw = await c.ev(`navigator.serviceWorker ? navigator.serviceWorker.getRegistration().then(r=>!!r) : false`);
   check('el modo sin conexión (service worker) está registrado', !!sw);

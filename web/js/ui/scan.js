@@ -2,7 +2,7 @@
 import { h, icon, toast, confirmBox, menuSheet, pushLayer, withBusy } from '../lib/dom.js';
 import { Camera } from '../core/camera.js';
 import { detectQuad } from '../core/detect.js';
-import { loadCV, canvasOf } from '../core/cv.js';
+import { loadCV, loadGL, canvasOf } from '../core/cv.js';
 import { warpQuad } from '../core/warp.js';
 import { scaled, blobToCanvas } from '../core/pages.js';
 import { composeIdSheet, startPage, recropPage } from '../core/docs.js';
@@ -24,32 +24,33 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
   const SVGNS = 'http://www.w3.org/2000/svg';
   const overlay = document.createElementNS(SVGNS, 'svg'); overlay.setAttribute('class', 'scan-overlay'); overlay.setAttribute('aria-hidden', 'true');
   const ovPoly = document.createElementNS(SVGNS, 'polygon'); ovPoly.setAttribute('class', 'scan-quad');
-  const ovDots = [0, 1, 2, 3].map(() => { const c = document.createElementNS(SVGNS, 'circle'); c.setAttribute('r', '7'); c.setAttribute('class', 'scan-dot'); return c; });
-  overlay.append(ovPoly, ...ovDots);
+  // segundo contorno que se va «dibujando» mientras el documento está quieto: muestra cuándo va a disparar el modo automático
+  const ovProg = document.createElementNS(SVGNS, 'polygon'); ovProg.setAttribute('class', 'scan-prog'); ovProg.setAttribute('pathLength', '100');
+  overlay.append(ovPoly, ovProg);
   const flashFx = h('div', { class: 'scan-flash' });
   const hint = h('div', { class: 'scan-hint', attrs: { 'aria-live': 'polite' } });
   const thumb = h('button', { class: 'scan-done', attrs: { type: 'button', 'aria-label': 'Terminar y revisar' } });
   const shutter = h('button', { class: 'scan-shutter', attrs: { type: 'button', 'aria-label': 'Hacer foto' } }, h('i'));
   const galleryIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, attrs: { 'aria-label': 'Importar imágenes' } });
-  const galleryBtn = h('button', { class: 'icon-btn solid', attrs: { type: 'button', 'aria-label': 'Importar de la galería' } }, icon('image'));
-  const flashBtn = h('button', { class: 'icon-btn solid', attrs: { type: 'button', 'aria-label': 'Linterna' }, hidden: true }, icon('flash'));
-  const flipBtn = h('button', { class: 'icon-btn solid', attrs: { type: 'button', 'aria-label': 'Cambiar de cámara' } }, icon('flip'));
-  const closeBtn = h('button', { class: 'icon-btn solid', attrs: { type: 'button', 'aria-label': 'Cerrar el escáner' } }, icon('close'));
-  const autoBtn = h('button', { class: 'chip scan-chip' + (auto ? ' on' : ''), attrs: { type: 'button', 'aria-pressed': String(auto) }, text: 'Auto' });
+  const galleryBtn = h('button', { class: 'scan-side', attrs: { type: 'button', 'aria-label': 'Importar de la galería' } }, icon('image'), h('span', { text: 'Galería' }));
+  const flashBtn = h('button', { class: 'icon-btn scan-ib', attrs: { type: 'button', 'aria-label': 'Linterna' }, hidden: true }, icon('flash'));
+  const flipBtn = h('button', { class: 'icon-btn scan-ib', attrs: { type: 'button', 'aria-label': 'Cambiar de cámara' } }, icon('flip'));
+  const closeBtn = h('button', { class: 'icon-btn scan-ib', attrs: { type: 'button', 'aria-label': 'Cerrar el escáner' } }, icon('close'));
+  const autoBtn = h('button', { class: 'scan-auto' + (auto ? ' on' : ''), attrs: { type: 'button', 'aria-pressed': String(auto), 'aria-label': 'Disparo automático' }, text: 'AUTO' });
   const modeSeg = h('div', { class: 'scan-modes', attrs: { role: 'tablist' } });
   const strip = h('div', { class: 'scan-strip', hidden: true, attrs: { role: 'list', 'data-scroll': true } });
   const msg = h('div', { class: 'scan-msg', hidden: true });
+  const stage = h('div', { class: 'scan-stage' }, video, overlay, flashFx, hint, msg);
   const root = h('div', { class: 'scan', attrs: { role: 'dialog', 'aria-label': 'Escáner de documentos' } },
-    video, overlay, flashFx,
-    h('div', { class: 'scan-top' }, closeBtn, h('div', { class: 'grow' }), autoBtn, flashBtn, flipBtn),
-    hint, msg,
+    h('div', { class: 'scan-top' }, closeBtn, h('div', { class: 'grow' }), flashBtn, autoBtn, flipBtn),
+    stage,
     h('div', { class: 'scan-bottom' }, strip, h('div', { class: 'scan-modes-wrap' }, modeSeg), h('div', { class: 'scan-controls' }, galleryBtn, shutter, thumb), galleryIn));
   document.body.append(root);
 
   const drawModes = () => {
     modeSeg.textContent = '';
     for (const [id, label, ic] of [['doc', 'Documento', 'file'], ['id', 'Identificación', 'idcard']]) {
-      modeSeg.append(h('button', { class: 'scan-mode' + (id === mode ? ' on' : ''), attrs: { type: 'button', role: 'tab', 'aria-selected': String(id === mode) }, on: { click: () => { if (mode !== id) { mode = id; idFront = null; drawModes(); setHint(); } } } }, icon(ic, 's'), label));
+      modeSeg.append(h('button', { class: 'scan-mode' + (id === mode ? ' on' : ''), attrs: { type: 'button', role: 'tab', 'aria-selected': String(id === mode) }, on: { click: () => { if (mode !== id) { mode = id; idFront = null; drawModes(); setHint(); } } } }, label));
     }
   };
   const setHint = (text) => {
@@ -122,7 +123,7 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
       flashBtn.hidden = !info.torch;
       video.classList.toggle('mirror', cam.facing === 'user');
       msg.hidden = true; setHint();
-      loadCV().catch(() => {});                           // calienta el motor de imagen mientras se encuadra
+      loadGL().then((g) => { if (!g) loadCV().catch(() => {}); });   // sin GPU útil, las páginas se hacen con OpenCV: se calienta mientras se encuadra
       loop();
     } catch (e) {
       const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
@@ -134,20 +135,29 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
 
   // ---- detección en vivo ----
   function videoRect() {
-    const r = root.getBoundingClientRect(), vw = video.videoWidth || 1, vh = video.videoHeight || 1, k = Math.min(r.width / vw, r.height / vh);
+    const r = stage.getBoundingClientRect(), vw = video.videoWidth || 1, vh = video.videoHeight || 1, k = Math.min(r.width / vw, r.height / vh);
     return { x: (r.width - vw * k) / 2, y: (r.height - vh * k) / 2, w: vw * k, h: vh * k };
   }
+  // El contorno no salta de una detección a la siguiente: en cada fotograma de pantalla se acerca un poco a la última posición detectada
+  // (seguimiento suave), y si una detección falla suelta se mantiene un momento en vez de parpadear.
+  const AUTO_MS = 900, HOLD_MS = 450;
+  let shown = null, lastSeen = 0, raf = 0, rawPrev = null;
   function paint() {
-    const r = root.getBoundingClientRect();
+    const r = stage.getBoundingClientRect();
     overlay.setAttribute('viewBox', `0 0 ${Math.round(r.width)} ${Math.round(r.height)}`);
-    overlay.classList.toggle('none', !quad);
-    if (!quad) return;
-    const v = videoRect(), pts = quad.map(([qx, qy]) => [v.x + qx * v.w, v.y + qy * v.h]);
-    overlay.classList.toggle('ok', !!(steadySince && performance.now() - steadySince > 500));
-    ovPoly.setAttribute('points', pts.map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' '));
-    pts.forEach(([px, py], i) => { ovDots[i].setAttribute('cx', px.toFixed(1)); ovDots[i].setAttribute('cy', py.toFixed(1)); });
+    if (quad) shown = shown ? shown.map((p, i) => [p[0] + (quad[i][0] - p[0]) * 0.35, p[1] + (quad[i][1] - p[1]) * 0.35]) : quad.map((p) => p.slice());
+    else shown = null;
+    overlay.classList.toggle('none', !shown);
+    if (!shown) return;
+    const v = videoRect(), pts = shown.map(([qx, qy]) => [v.x + qx * v.w, v.y + qy * v.h]), str = pts.map((p) => p.map((n) => n.toFixed(1)).join(',')).join(' ');
+    const held = steadySince ? performance.now() - steadySince : 0;
+    overlay.classList.toggle('ok', held > 300);
+    ovPoly.setAttribute('points', str); ovProg.setAttribute('points', str);
+    ovProg.style.strokeDashoffset = String(auto && held ? Math.max(0, 100 - (held / AUTO_MS) * 100) : 100);
   }
-  let pace = 160;                                    // pausa entre detecciones: se alarga sola si cada una tarda (el teléfono va justo o el motor está ocupado procesando páginas)
+  const frame = () => { if (!running) return; paint(); raf = requestAnimationFrame(frame); };
+  raf = requestAnimationFrame(frame);
+  let pace = 100;                                    // pausa entre detecciones: se alarga sola si cada una tarda (el teléfono va justo o el motor está ocupado procesando páginas)
   async function loop() {
     if (!running) return;
     if (!detecting && !shooting && video.videoWidth && document.visibilityState === 'visible') {
@@ -155,19 +165,21 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
       const t0 = performance.now();
       try {
         const q = await detectQuad(video, { maxSide: 420 });
-        quad = q;
-        if (q) {
+        const confirmed = q && rawPrev && delta(q, rawPrev) < 0.05;
+        rawPrev = q;
+        if (confirmed || (q && quad)) { quad = q; lastSeen = performance.now(); }
+        else if (performance.now() - lastSeen > HOLD_MS) quad = null;     // un fotograma sin detección (reflejo, desenfoque) no borra el contorno
+        if (q && quad) {
           history.push(q); if (history.length > 4) history.shift();
           const steady = history.length >= 3 && history.slice(1).every((h2, i) => delta(h2, history[i]) < 0.02);
           if (steady) { if (!steadySince) steadySince = performance.now(); } else steadySince = 0;
-          if (auto && steadySince && performance.now() - steadySince > 1100 && !shooting && performance.now() - firedFor > 2500) { firedFor = performance.now(); setHint('Documento detectado'); capture(true); }
+          if (auto && steadySince && performance.now() - steadySince > AUTO_MS && !shooting && performance.now() - firedFor > 2500) { firedFor = performance.now(); setHint('Documento detectado'); capture(true); }
           else if (!steadySince && history.length) hint.textContent = mode === 'id' ? (idFront ? 'Ahora el REVERSO del documento' : 'Encuadra el ANVERSO del documento') : 'Mantén quieto el documento';
           else if (steadySince && !auto) hint.textContent = 'Listo: pulsa el botón para escanear';
-        } else { history = []; steadySince = 0; setHint(); }
+        } else if (!quad) { history = []; steadySince = 0; setHint(); }
       } catch (e) { quad = null; }
       detecting = false;
-      paint();
-      pace = Math.min(700, Math.max(160, Math.round(pace * 0.5 + (performance.now() - t0) * 1.5)));   // la detección ocupa como mucho ~40 % del tiempo
+      pace = Math.min(700, Math.max(100, Math.round(pace * 0.5 + (performance.now() - t0) * 1.5)));   // la detección ocupa como mucho ~40 % del tiempo
     }
     setTimeout(loop, pace);
   }
@@ -218,7 +230,7 @@ export function openScanner({ onDone, onCancel = () => {}, startMode = 'doc' } =
   }
 
   // ---- cierre ----
-  function teardown() { running = false; if (cam) cam.stop(); root.remove(); document.removeEventListener('visibilitychange', onVis); }
+  function teardown() { running = false; cancelAnimationFrame(raf); if (cam) cam.stop(); root.remove(); document.removeEventListener('visibilitychange', onVis); }
   function finish() {
     if (finished) return; finished = true;
     const result = items.slice();

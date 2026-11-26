@@ -84,3 +84,22 @@ input[type=range] { width: 100%; accent-color: var(--a); height: 32px; }
 .empty p { max-width: 380px; margin: 0 auto 22px; }
 .badge { display: inline-block; min-width: 22px; padding: 1px 8px; border-radius: 999px; background: var(--panel3); color: var(--txt); font-size: 12px; text-align: center; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* hoja Exportar: vista de la página y lista de acciones de un toque */
+.exp-head { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.exp-thumb { flex: none; display: grid; place-items: center; width: 64px; height: 84px; border-radius: 8px; background: #fff; overflow: hidden; border: 1px solid var(--line); color: var(--mut); }
+.exp-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.exp-info { min-width: 0; display: grid; gap: 4px; }
+.exp-info b { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exp-info small { color: var(--mut); }
+.exp-list { display: grid; gap: 4px; }
+.exp-act { display: flex; align-items: center; gap: 16px; min-height: 60px; padding: 8px; border: 0; border-radius: 12px; background: none; color: inherit; text-align: left; }
+.exp-act:hover, .exp-act:focus-visible { background: var(--panel2); }
+.exp-ic { flex: none; display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: var(--panel2); color: var(--a); }
+.exp-tx { display: grid; gap: 2px; }
+.exp-tx b { font-size: 15.5px; font-weight: 600; }
+.exp-tx small { color: var(--mut); font-size: 12.5px; }
+.exp-opts { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+.exp-opts summary { display: flex; align-items: center; gap: 8px; min-height: 44px; color: var(--mut); cursor: pointer; list-style: none; }
+.exp-opts summary::-webkit-details-marker { display: none; }
+.exp-opts[open] summary { color: inherit; margin-bottom: 6px; }

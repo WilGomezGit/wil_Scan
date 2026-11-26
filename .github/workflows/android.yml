@@ -3,6 +3,8 @@ on:
   pull_request:
     paths: ['web/**', 'android/**', 'capacitor.config.json', 'package*.json', '.github/workflows/android.yml']
   workflow_dispatch:
+permissions:
+  contents: write   # para publicar el APK de prueba como descarga directa
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -42,3 +44,15 @@ jobs:
         with:
           name: WilScan-APK
           path: android/app/build/outputs/apk/**/*.apk
+      # Descarga directa (sin .zip ni iniciar sesión): el APK se publica en la versión de prueba «prueba» del repositorio
+      # y se reemplaza en cada compilación. Enlace fijo: https://github.com/<repo>/releases/download/prueba/WilScan-prueba.apk
+      - name: Publicar el APK de prueba
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
+          cp "$APK" WilScan-prueba.apk
+          VER=$(grep -m1 versionName android/app/build.gradle | sed 's/.*"\(.*\)".*/\1/')
+          gh release view prueba --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create prueba --repo "$GITHUB_REPOSITORY" --prerelease --target "${{ github.event.repository.default_branch }}" --title "WilScan de prueba" --notes "APK de prueba"
+          gh release edit prueba --repo "$GITHUB_REPOSITORY" --prerelease --title "WilScan $VER (prueba)" --notes "APK de prueba de la versión $VER, compilado de ${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} (${GITHUB_SHA::7}). Descarga WilScan-prueba.apk e instálalo."
+          gh release upload prueba WilScan-prueba.apk --repo "$GITHUB_REPOSITORY" --clobber

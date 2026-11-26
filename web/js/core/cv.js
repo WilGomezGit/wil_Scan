@@ -132,10 +132,13 @@ export function loadGL() {
   if (!glP) {
     let mode = 'auto';   // auto: con prueba de velocidad · force/off: para pruebas (?gpu=force o localStorage wilscan-gpu)
     try { const m = new URLSearchParams(location.search).get('gpu') || localStorage.getItem('wilscan-gpu'); if (m === 'force' || m === 'off') mode = m; } catch { /* sin almacenamiento */ }
-    glP = workerEngine('./gl-worker.js?gpu=' + mode).then((h) => {
+    let known = '';
+    try { known = localStorage.getItem('wilscan-gpu-ok') || ''; } catch { /* sin almacenamiento */ }
+    glP = workerEngine('./gl-worker.js?gpu=' + mode + (known ? '&known=' + encodeURIComponent(known) : '')).then((h) => {
       const g = h.caps.gpu || {};
-      if (!h.caps.render) { perf.gpu = 'GPU no disponible' + (g.error ? ': ' + g.error : ''); h.stop(); glOff = true; return null; }
-      perf.gpu = 'GPU (WebGL2): ' + g.renderer + (g.benchmarkMs != null ? ` · prueba: ${g.benchmarkMs} ms` : '');
+      if (!h.caps.render) { perf.gpu = 'GPU no disponible' + (g.error ? ': ' + g.error : ''); h.stop(); glOff = true; try { localStorage.removeItem('wilscan-gpu-ok'); } catch { /* sin almacenamiento */ } return null; }
+      perf.gpu = 'GPU (WebGL2): ' + g.renderer + (g.benchmarkMs != null ? ` · prueba: ${g.benchmarkMs} ms` + (g.cached ? ' (guardada)' : '') : '');
+      if (g.benchmarkMs != null && !g.cached) { try { localStorage.setItem('wilscan-gpu-ok', JSON.stringify({ renderer: g.renderer, ms: g.benchmarkMs })); } catch { /* sin almacenamiento */ } }
       return h;
     }).catch((e) => { perf.gpu = 'GPU no disponible: ' + e.message; glOff = true; return null; });
   }

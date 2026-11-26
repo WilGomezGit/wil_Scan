@@ -1,5 +1,5 @@
 {
- "version": "9fe8623b12",
+ "version": "b41276d640",
  "shell": [
   "./",
   "assets/icon-192.png",
@@ -23,6 +23,7 @@
   "js/core/cv.js",
   "js/core/db.js",
   "js/core/deskew.js",
+  "js/core/detect-worker.js",
   "js/core/detect.js",
   "js/core/docs.js",
   "js/core/filters.js",
@@ -34,6 +35,7 @@
   "js/core/pdf-tools.js",
   "js/core/pool.js",
   "js/core/qr.js",
+  "js/core/quad.js",
   "js/core/render-ops.js",
   "js/core/share.js",
   "js/core/warp.js",

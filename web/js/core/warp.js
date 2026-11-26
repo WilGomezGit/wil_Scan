@@ -1,5 +1,6 @@
 // Corrección de perspectiva: recorta el documento dentro de las 4 esquinas y lo deja rectangular.
 import { cvRun, canvasOf, canvasFrom, imageOf } from './cv.js';
+import { detectWorker } from './detect.js';
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
@@ -22,6 +23,9 @@ export async function warpQuad(src, quad, { maxSide = 2200 } = {}) {
   x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
   x.drawImage(src, x0, y0, bw, bh, 0, 0, crop.width, crop.height);
   const local = p.map(([px, py]) => [(px - x0) * crop.width / bw, (py - y0) * crop.height / bh]);
+  // primero en el Worker liviano (JavaScript puro, sin esperar a OpenCV); si no está, con OpenCV
+  const wk = await detectWorker();
+  if (wk && !wk.dead) { try { const img = imageOf(crop); return canvasFrom(await wk.run('warp', { img, p: local, W, H }, [img.data.buffer], 20000)); } catch { /* con OpenCV */ } }
   return canvasFrom(await cvRun('warp', [imageOf(crop), local, W, H]));
 }
 

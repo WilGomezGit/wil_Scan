@@ -39,6 +39,10 @@ const GROUPS = [
   ]],
 ];
 
+export function openTool(id) {
+  for (const [, list] of GROUPS) { const t = list.find((x) => x.id === id); if (t) return OPEN[id](t); }
+}
+
 export function initTools(callbacks) {
   cb = callbacks;
   const root = $('#v-tools');
