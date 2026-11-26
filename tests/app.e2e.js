@@ -509,7 +509,7 @@ G.ajustes = async () => {
   await c.send('Page.reload'); await wf(() => c.ev(`document.documentElement.dataset.ready==='1'`), 15000); await sleep(400);
   await c.ev(`WilScan.show('settings'); true`); await sleep(300);
   const st = await c.ev(`new Promise((res)=>{const r=indexedDB.open('wilscan'); r.onsuccess=()=>{const g=r.result.transaction('kv').objectStore('kv').get('settings'); g.onsuccess=()=>res(g.result)}})`);
-  check('los ajustes se guardan y sobreviven al recargar', st && st.pdfSize === 'letter' && st.autoCapture === true, j(st));
+  check('los ajustes se guardan y sobreviven al recargar', st && st.pdfSize === 'letter' && st.autoCapture === false && st.v6 === true, j(st));
   check('muestra el almacenamiento usado', /usados de/.test(await text('#v-settings .card.pad .hint')) || /usados de/.test(await text('#v-settings')));
   const sw = await c.ev(`navigator.serviceWorker ? navigator.serviceWorker.getRegistration().then(r=>!!r) : false`);
   check('el modo sin conexión (service worker) está registrado', !!sw);

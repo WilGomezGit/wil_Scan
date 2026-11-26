@@ -8,14 +8,19 @@ export const DEFAULTS = {
   quality: 'high',         // normal | high | max
   searchablePdf: true,     // PDF con texto buscable (usa OCR)
   reviewCrop: true,        // tras cada foto, mostrar el recorte para confirmarlo o repetir
-  autoCapture: false,      // dispara solo cuando el documento está quieto y encuadrado
+  autoCapture: true,       // dispara solo cuando el documento está quieto y encuadrado
   filter: 'auto',          // filtro por defecto de las fotos nuevas
   haptics: true,
 };
 export const QUALITY = { normal: 0.78, high: 0.9, max: 0.96 };
 
 let cache = null;
-export async function loadSettings() { cache = { ...DEFAULTS, ...(await kvGet('settings', {})) }; return cache; }
+export async function loadSettings() {
+  const saved = await kvGet('settings', {});
+  // 1.0.6: el disparo automático pasa a venir activado (como en los escáneres conocidos); se activa una vez también a quien ya tenía ajustes guardados
+  if (saved && !saved.v6) { saved.autoCapture = true; saved.v6 = true; }
+  cache = { ...DEFAULTS, ...saved }; return cache;
+}
 export const getSettings = () => cache || { ...DEFAULTS };
 export async function setSettings(patch) { cache = { ...getSettings(), ...patch }; await kvSet('settings', cache); return cache; }
 export const getSignature = () => kvGet('signature', null);
