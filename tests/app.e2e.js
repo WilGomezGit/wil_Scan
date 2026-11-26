@@ -166,6 +166,7 @@ G.exportar = async () => {
   // PDF buscable
   let before = downloads();
   await c.ev(`(()=>{const i=document.querySelector('.sheet .field input'); i.value='Factura de prueba'; i.dispatchEvent(new Event('input',{bubbles:true})); return true})()`);
+  await c.ev(`(()=>{ const i=[...document.querySelectorAll('.sheet .check input')].find((x)=>/buscable/.test(x.parentElement.textContent)); if (!i.checked) i.click(); return true })()`);   // el PDF buscable solo se hace si se pide
   await clickText('.sheet .exp-act', 'Guardar PDF');
   const pdf = await newDownloads(before, 1, 120000);
   check('«Guardar» descarga un PDF con el nombre elegido', pdf.length === 1 && pdf[0].n === 'Factura de prueba.pdf', pdf.map((x) => x.n).join());
